@@ -6,7 +6,7 @@ Skill 的运行事实源是数据库。模块、项目、租户定义均保存�
 
 先执行模块迁移，再发布应用。追加迁移为既有定义增加正文与摘要列，不伪造历史内容。旧记录没有正文或摘要损坏时不可选用；须经受控发布补齐或创建新版本。AiSkill 默认关闭，目录身份依赖核心新契约，最低核心 2.13.0，须与对应核心版本一起发布。
 
-开发者可把经过代码审核的种子放在模块/项目根目录的 `resources/skills/catalog.json`（schema_version=1），通过部署命令 `php artisan ai-skill:import <root> --scope=module` 导入；项目使用 `--scope=project`。命名空间来自根目录 composer.json 的 extra.saas.name。正文路径仅供导入器使用，限定在 resources/skills 内相应版本目录；完整正文入库后不再依赖该文件。
+开发者可把经过代码审核的种子放在模块/项目根目录的 `resources/skills/catalog.json`（schema_version=1），通过部署命令 `php artisan ai-skill:import <root> --scope=module` 导入；项目使用 `--scope=project`。模块命名空间来自来源 composer.json 的 extra.saas.name；项目来源可使用 extra.ai_skill.name，避免仅为导入 Skill 就把私有模块注册为框架标准件。正文路径仅供导入器使用，限定在 resources/skills 内相应版本目录；完整正文入库后不再依赖该文件。
 
 同版本相同内容幂等重放，冲突拒绝且整批回滚；新版本新增记录，停用版本不会被重放重新启用。已发布及停用版本的正文、摘要和语义元数据不可原地修改。导入仅表示已审核资源入库，不代表工具兼容、评测或执行验收通过。
 

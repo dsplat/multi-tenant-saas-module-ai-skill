@@ -21,7 +21,10 @@ final class SkillSeedLoader
             throw new SkillDomainException('data_incomplete', 'Seed source directory is missing.');
         }
         $composer = $this->json($this->asset($root, 'composer.json'));
-        $namespace = $composer['extra']['saas']['name'] ?? null;
+        // Project seed identity must not accidentally promote a private app module into the framework pool.
+        $namespace = $scope === 'project'
+            ? ($composer['extra']['ai_skill']['name'] ?? $composer['extra']['saas']['name'] ?? null)
+            : ($composer['extra']['saas']['name'] ?? null);
         if (! is_string($namespace) || ! preg_match('/^[a-z][a-z0-9_-]{0,49}$/D', $namespace)) {
             throw new SkillDomainException('data_incomplete', 'Source must declare its registered module name.');
         }

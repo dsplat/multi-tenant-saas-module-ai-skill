@@ -16,6 +16,12 @@ final class ExecutionEnvelope
 
     public const MAX_ATTRIBUTE_BYTES = 4096;
 
+    public const ATTRIBUTE_KEYS = [
+        'tool_status', 'duration_ms', 'agent_id', 'action', 'chain_status',
+        'current_step', 'conversation_id', 'model_ref', 'skill_key', 'skill_version',
+        'prompt_tokens', 'completion_tokens', 'total_tokens', 'cost_micro', 'outcome',
+    ];
+
     /**
      * @param  array<string, mixed>  $attributes  受限扩展位（key 白名单、脱敏）
      * @param  array<string, mixed>  $sourceRefs  源表主键引用
@@ -30,13 +36,24 @@ final class ExecutionEnvelope
         public readonly array $sourceRefs = [],
         public readonly array $attributes = [],
         public readonly int $schemaVersion = self::SCHEMA_VERSION,
-    ) {}
+    ) {
+        if ($schemaVersion !== self::SCHEMA_VERSION || count($attributes) > self::MAX_ATTRIBUTES) {
+            throw new \InvalidArgumentException('Invalid execution envelope schema or attribute count.');
+        }
+        foreach ($attributes as $key => $value) {
+            if (! in_array($key, self::ATTRIBUTE_KEYS, true)
+                || (! is_scalar($value) && $value !== null)
+                || strlen(json_encode($value, JSON_THROW_ON_ERROR)) > self::MAX_ATTRIBUTE_BYTES) {
+                throw new \InvalidArgumentException('Invalid execution attribute.');
+            }
+            if (is_string($value) && (preg_match('/(?:Bearer\s|sk-[A-Za-z0-9_-]{8,}|[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}|(?<!\d)1[3-9]\d{9}(?!\d))/i', $value) === 1)) {
+                throw new \InvalidArgumentException('Sensitive execution attribute.');
+            }
+        }
+    }
 
     public function withAttribute(string $key, mixed $value): self
     {
-        if (count($this->attributes) >= self::MAX_ATTRIBUTES) {
-            return $this;
-        }
         $attrs = $this->attributes;
         $attrs[$key] = $value;
 

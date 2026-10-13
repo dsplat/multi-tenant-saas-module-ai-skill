@@ -1,0 +1,30 @@
+{
+  "name": "dsplat/multi-tenant-saas-module-ai-skill",
+  "description": "Skill 生命周期与持续学习 - 目录、收藏、经验、训练与推荐",
+  "type": "library",
+  "license": "MIT",
+  "autoload": {
+    "psr-4": {
+      "MultiTenantSaas\\Modules\\AiSkill\\": ""
+    }
+  },
+  "require": {
+    "php": "^8.3",
+    "dsplat/multi-tenant-saas": "^2.0",
+    "dsplat/multi-tenant-saas-module-ai": "^2.0"
+  },
+  "extra": {
+    "saas": {
+      "name": "ai-skill",
+      "priority": 95,
+      "dependencies": [
+        "ai"
+      ],
+      "conflicts": [],
+      "requires_core": ">=2.0.0",
+      "provider": "MultiTenantSaas\\Modules\\AiSkill\\AiSkillServiceProvider",
+      "tenant_toggleable": true,
+      "module_loadable": true
+    }
+  }
+}

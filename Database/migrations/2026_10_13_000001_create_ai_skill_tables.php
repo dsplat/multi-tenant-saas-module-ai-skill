@@ -26,7 +26,7 @@ return new class extends Migration
                 $table->string('skill_key', 100);
                 $table->string('version', 50);
                 $table->string('scope_type', 20); // module|project|tenant
-                $table->unsignedBigInteger('scope_id')->nullable();
+                $table->unsignedBigInteger('scope_id')->default(0);
                 $table->string('owner_type', 20)->nullable();
                 $table->unsignedBigInteger('owner_id')->nullable();
                 $table->string('execution', 20); // chain|instructions|mixed
@@ -58,7 +58,7 @@ return new class extends Migration
                 $table->string('label', 255)->nullable();
                 $table->timestamps();
 
-                $table->unique(['tenant_id', 'operator_id', 'skill_key', 'version'], 'ai_skill_fav_tenant_op_key_ver_unique');
+                $table->unique(['tenant_id', 'scope', 'operator_id', 'skill_key', 'version'], 'ai_skill_fav_tenant_op_key_ver_unique');
                 $table->index(['tenant_id', 'scope', 'skill_key'], 'ai_skill_fav_tenant_scope_key');
             });
         }

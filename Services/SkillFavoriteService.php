@@ -28,7 +28,10 @@ final class SkillFavoriteService implements SkillFavoriteServiceContract
         if ($scope === 'tenant') {
             $this->policy->authorizeTenantWrite($actor);
         }
-        $definition = $this->catalog->resolve((string) ($reference['skill_key'] ?? ''), (string) ($reference['version'] ?? ''));
+        $definition = $this->catalog->resolveSnapshot((string) ($reference['skill_key'] ?? ''), (string) ($reference['version'] ?? ''));
+        if (isset($reference['definition_ref']) && ! in_array($reference['definition_ref'], [(string) $definition->getKey(), $definition->content_ref], true)) {
+            throw new SkillDomainException('version_conflict', 'Favorite reference does not match the selected immutable definition.');
+        }
         $defaults = $this->policy->validateDefaults($definition, $allowedDefaults);
 
         return SkillFavorite::withoutGlobalScopes()->updateOrCreate([
@@ -40,7 +43,21 @@ final class SkillFavoriteService implements SkillFavoriteServiceContract
     public function list(): array
     {
         return $this->visible($this->actor())->orderByDesc('updated_at')
-            ->orderByDesc((new SkillFavorite)->getKeyName())->get()->toArray();
+            ->orderByDesc((new SkillFavorite)->getKeyName())->get()->map(function (SkillFavorite $favorite): array {
+                $view = $favorite->toArray();
+                try {
+                    $definition = $this->catalog->resolveSnapshot($favorite->skill_key, $favorite->version);
+                    $this->policy->validateDefaults($definition, $favorite->allowed_defaults ?? []);
+                    $view['reference_status'] = 'available';
+                    $view['reason'] = null;
+                } catch (SkillDomainException $exception) {
+                    $view['reference_status'] = 'unavailable';
+                    $view['reason'] = $exception->reason;
+                }
+
+                // Availability of a stored reference does not authorize a run or validate live tools.
+                return $view;
+            })->all();
     }
 
     public function remove(array $reference): void

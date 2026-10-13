@@ -21,18 +21,37 @@ final class SkillCatalog
         }
 
         return $this->visible()->orderBy('skill_key')->orderBy('version')
-            ->orderBy((new SkillDefinition)->getKeyName())->limit($limit)->get()->toArray();
+            ->orderBy((new SkillDefinition)->getKeyName())->limit($limit)->get()->map(function (SkillDefinition $definition): array {
+                $view = $definition->toArray();
+                try {
+                    $definition->snapshot();
+                    $view['content_status'] = 'ready';
+                } catch (SkillDomainException) {
+                    $view['content_status'] = 'missing_or_corrupt';
+                }
+
+                return $view;
+            })->all();
     }
 
     public function resolve(string $skillKey, string $version): SkillDefinition
     {
-        $matches = $this->visible()->where('skill_key', $skillKey)->where('version', $version)->limit(2)->get();
+        $matches = $this->visible()->where('skill_key', $skillKey)->where('version', $version)
+            ->orderBy((new SkillDefinition)->getKeyName())->limit(2)->get();
         if ($matches->count() !== 1) {
             throw new SkillDomainException($matches->isEmpty() ? 'scope_denied' : 'version_conflict',
                 'Skill reference must identify exactly one visible published version.');
         }
 
         return $matches->first();
+    }
+
+    public function resolveSnapshot(string $skillKey, string $version): SkillDefinition
+    {
+        $definition = $this->resolve($skillKey, $version);
+        $definition->snapshot();
+
+        return $definition;
     }
 
     private function visible(): Builder

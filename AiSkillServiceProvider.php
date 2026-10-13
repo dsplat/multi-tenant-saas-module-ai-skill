@@ -23,6 +23,11 @@ class AiSkillServiceProvider extends ModuleServiceProvider
         $this->app->bind(Contracts\SkillFavoriteServiceContract::class, Services\SkillFavoriteService::class);
     }
 
+    protected function registerModuleCommands(): void
+    {
+        $this->commands([Console\ImportSkillSeedsCommand::class]);
+    }
+
     protected function bootModule(): void
     {
         $this->app['router']->aliasMiddleware('ai-skill.enabled', Http\Middleware\EnsureAiSkillEnabled::class);

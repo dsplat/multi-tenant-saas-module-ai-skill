@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "skills": [
+    {
+      "skill_key": "module.ai-skill.organize_favorites",
+      "version": "1.0.0",
+      "execution": "instructions",
+      "title": "整理任务收藏",
+      "description": "查看个人及租户共享收藏，识别失效引用并给出整理建议，不自动写入。",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "display": {
+            "type": "string",
+            "enum": [
+              "compact",
+              "full"
+            ],
+            "x-favorite-default": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "applicability": {
+        "audience": "operator",
+        "purpose": "review_favorites"
+      },
+      "tool_deps": [],
+      "risk": {
+        "level": "L1",
+        "business_write": false
+      },
+      "success_criteria": {
+        "scopes_separated": true,
+        "unavailable_references_explained": true,
+        "no_automatic_writes": true
+      },
+      "content_path": "resources/skills/organize-favorites/1.0.0/SKILL.md"
+    }
+  ]
+}

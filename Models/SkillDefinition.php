@@ -13,7 +13,7 @@ use MultiTenantSaas\Modules\AiSkill\Models\Builders\SkillDefinitionBuilder;
  * Skill 定义一版（skill_key+version+scope_type+scope_id 唯一）。
  *
  * 发布版本不可原地改；execution 为 chain|instructions|mixed。
- * 模块/project 种子随代码交付，tenant 版本可持久化。
+ * 所有作用域持久化完整正文；模块/project 文件仅为部署期导入来源。
  * 本表无 tenant_id（scope 维度隔离），故不挂 BelongsToTenant。
  */
 class SkillDefinition extends Model
@@ -41,7 +41,7 @@ class SkillDefinition extends Model
     public const SEMANTIC_FIELDS = [
         'skill_key', 'version', 'scope_type', 'scope_id', 'owner_type', 'owner_id',
         'execution', 'title', 'description', 'input_schema', 'applicability',
-        'tool_deps', 'risk', 'success_criteria', 'content_ref',
+        'tool_deps', 'risk', 'success_criteria', 'content_ref', 'content_body', 'content_sha256',
     ];
 
     protected $attributes = ['scope_id' => 0, 'status' => self::STATUS_DRAFT];
@@ -49,6 +49,20 @@ class SkillDefinition extends Model
     protected static function booted(): void
     {
         static::saving(function (self $skill): void {
+            if ($skill->content_body !== null) {
+                if (! is_string($skill->content_body) || $skill->content_body === '' || strlen($skill->content_body) > 262144
+                    || ! mb_check_encoding($skill->content_body, 'UTF-8')) {
+                    throw new SkillDomainException('data_incomplete', 'Invalid Skill content snapshot.');
+                }
+                $digest = hash('sha256', $skill->content_body);
+                if ($skill->content_sha256 === null) {
+                    $skill->content_sha256 = $digest;
+                } elseif (! hash_equals($digest, $skill->content_sha256)) {
+                    throw new SkillDomainException('verification_missing', 'Skill snapshot digest mismatch.');
+                }
+            } elseif ($skill->content_sha256 !== null) {
+                throw new SkillDomainException('verification_missing', 'Skill snapshot content is missing.');
+            }
             if (! in_array($skill->scope_type, [self::SCOPE_MODULE, self::SCOPE_PROJECT, self::SCOPE_TENANT], true)
                 || ($skill->scope_type === self::SCOPE_TENANT && (int) $skill->scope_id <= 0)
                 || ($skill->scope_type !== self::SCOPE_TENANT && $skill->scope_id !== 0)
@@ -72,6 +86,8 @@ class SkillDefinition extends Model
 
     protected $primaryKey = 'skill_definition_id';
 
+    protected $hidden = ['content_body'];
+
     protected $fillable = [
         'skill_key',
         'version',
@@ -88,6 +104,8 @@ class SkillDefinition extends Model
         'risk',
         'success_criteria',
         'content_ref',
+        'content_body',
+        'content_sha256',
         'status',
     ];
 
@@ -102,6 +120,17 @@ class SkillDefinition extends Model
             'scope_id' => 'integer',
             'owner_id' => 'integer',
         ];
+    }
+
+    /** Content stays local to the DB row; never resolve content_ref as a filesystem path. */
+    public function snapshot(): string
+    {
+        if (! is_string($this->content_body) || $this->content_body === '' || ! is_string($this->content_sha256)
+            || ! hash_equals(hash('sha256', $this->content_body), $this->content_sha256)) {
+            throw new SkillDomainException('verification_missing', 'Immutable Skill snapshot is missing or corrupt.');
+        }
+
+        return $this->content_body;
     }
 
     public function isPublished(): bool

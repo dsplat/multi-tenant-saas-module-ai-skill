@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use MultiTenantSaas\Http\Controllers\BaseController;
 use MultiTenantSaas\Modules\AiSkill\Contracts\SkillFavoriteServiceContract;
 use MultiTenantSaas\Modules\AiSkill\Services\SkillCatalog;
+use MultiTenantSaas\Modules\AiSkill\Services\SkillDefinitionManagement;
 
 class SkillCatalogController extends BaseController
 {
@@ -22,6 +23,14 @@ class SkillCatalogController extends BaseController
         $definition = $catalog->resolveSnapshot($skillKey, $version);
 
         return response()->json(['success' => true, 'data' => [...$definition->toArray(), 'content_body' => $definition->snapshot()]]);
+    }
+
+    public function changeStatus(Request $request, string $definitionId, SkillDefinitionManagement $management)
+    {
+        $data = $request->validate(['expected_status' => 'required|in:published,disabled', 'status' => 'required|in:published,disabled']);
+        validator(['definition_id' => $definitionId], ['definition_id' => 'required|integer|min:1'])->validate();
+
+        return response()->json(['success' => true, 'data' => $management->changeStatus((int) $definitionId, $data['expected_status'], $data['status'])]);
     }
 
     public function favorites(SkillFavoriteServiceContract $favorites)

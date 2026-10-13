@@ -4,6 +4,7 @@ use Illuminate\Support\Facades\Route;
 use MultiTenantSaas\Modules\AiSkill\Http\Controllers\SkillCatalogController;
 
 Route::prefix('tenant/ai-skills')->middleware(['ai-skill.enabled', 'rbac.permission:ai.capability.view'])->group(function () {
+    Route::patch('/definitions/{definitionId}/status', [SkillCatalogController::class, 'changeStatus']);
     Route::get('/', [SkillCatalogController::class, 'index']);
     Route::get('/{skillKey}/versions/{version}', [SkillCatalogController::class, 'definition']);
     Route::get('/favorites', [SkillCatalogController::class, 'favorites']);

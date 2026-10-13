@@ -18,6 +18,7 @@ Skill 的运行事实源是数据库。模块、项目、租户定义均保存�
 
 - GET：可见的已发布版本元数据，正文不进入列表，content_status 表明是否可用。
 - GET `/{skillKey}/versions/{version}`：通过数据库校验正文摘要后返回完整内容。
+- PATCH `/definitions/{definitionId}/status`：本租户已发布版本停用/恢复，提交 expected_status 和 status（published/disabled），额外核验 setting.update；不能发布草稿或操作全局/其他租户版本。恢复必须校验数据库快照，正文仍不可修改。
 - GET/POST `/favorites`、DELETE `/favorites/{favoriteId}`：引用型个人与租户收藏；共享写入额外核验管理权限。
 
 入口复用认证、显式租户、模块开关与 RBAC。收藏绑定具体版本，默认参数仅允许明确声明的有限枚举；旧版本停用或内容缺失时保留收藏并标不可用，不静默升级。

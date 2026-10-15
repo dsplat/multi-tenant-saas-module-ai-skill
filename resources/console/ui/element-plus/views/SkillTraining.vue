@@ -12,7 +12,7 @@
         type="info"
         :closable="false"
         show-icon
-        title="当前仅登记任务与候选；异步LLM训练处理器尚未接线。训练完成 ≠ 候选可采用；采用裁决只来自服务端 AdoptionPolicy。成本缺失显示 unknown。文档上传契约未交付前仅支持授权来源引用。"
+        title="训练任务需显式声明采样窗口（窗口是授权的一部分，缺失即拒绝登记）。异步LLM训练处理器由平台执行器开关驱动，默认关闭。训练完成 ≠ 候选可采用；判据只由独立评测器写入，采用裁决只来自服务端 AdoptionPolicy。成本缺失显示 unknown。"
         style="margin-bottom: 12px"
       />
 
@@ -23,6 +23,17 @@
             <el-option label="skill_experiences" value="skill_experiences" />
             <el-option label="task_chain_runs" value="task_chain_runs" />
           </el-select>
+        </el-form-item>
+        <el-form-item label="采样窗口">
+          <el-date-picker
+            v-model="form.window"
+            type="daterange"
+            unlink-panels
+            range-separator="至"
+            start-placeholder="起"
+            end-placeholder="止"
+            style="width: 240px"
+          />
         </el-form-item>
         <el-form-item label="样本上限">
           <el-input-number v-model="form.maxSamples" :min="1" :max="500" />
@@ -45,6 +56,9 @@
             <span v-if="row.cost_unknown">unknown</span>
             <span v-else>{{ row.cost_micro }}</span>
           </template>
+        </el-table-column>
+        <el-table-column label="LLM 调用" width="90">
+          <template #default="{ row }">{{ row.llm_calls ?? 0 }}</template>
         </el-table-column>
         <el-table-column label="操作" width="120" fixed="right">
           <template #default="{ row }">
@@ -147,6 +161,7 @@ const candidates = ref<TrainingCandidate[]>([])
 const form = ref({
   sources: ['audit_logs', 'skill_experiences'] as string[],
   maxSamples: 100,
+  window: null as [Date, Date] | null,
 })
 
 function statusTag(status: string): 'success' | 'info' | 'warning' | 'danger' {
@@ -188,6 +203,11 @@ async function loadCandidates() {
 }
 
 async function start() {
+  const [from, to] = form.value.window ?? []
+  if (!from || !to) {
+    ElMessage.warning('必须显式选择采样窗口')
+    return
+  }
   busy.value = true
   try {
     await startTraining({
@@ -195,6 +215,9 @@ async function start() {
       dataset_manifest: {
         source_types: form.value.sources,
         max_samples: form.value.maxSamples,
+        // 窗口按 UTC 冻结，止点取次日 00:00（后端比较为 <=，含所选末日全天）
+        time_from: new Date(from).toISOString(),
+        time_to: new Date(to.getTime() + 86400000).toISOString(),
       },
       request_key: makeRequestKey('train'),
     })

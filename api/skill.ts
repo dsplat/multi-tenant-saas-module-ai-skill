@@ -404,6 +404,12 @@ export interface TrainingRun {
   budget?: Record<string, unknown> | null
   cost_micro?: number | null
   cost_unknown: boolean
+  // 执行事实：区分「模型真跑过」与「状态流转过」
+  llm_calls?: number | null
+  usage?: Record<string, unknown> | null
+  cost_source?: string | null
+  started_at?: string | null
+  finished_at?: string | null
   error?: string | null
   created_at?: string | null
   updated_at?: string | null

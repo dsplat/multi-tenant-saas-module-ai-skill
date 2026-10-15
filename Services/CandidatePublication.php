@@ -18,14 +18,7 @@ final class CandidatePublication
         }
         $draft = (array) $candidate->skill_draft;
         $tenant = (int) $candidate->tenant_id;
-        $data = validator($draft, [
-            'skill_key' => 'required|string|max:100', 'version' => 'required|string|max:50',
-            'title' => 'required|string|max:255', 'description' => 'sometimes|string|max:2000',
-            'execution' => 'required|in:instructions,chain,mixed',
-            'content_body' => 'required|string|max:262144', 'input_schema' => 'required|array',
-            'applicability' => 'present|array', 'tool_deps' => 'present|array',
-            'risk' => 'required|array', 'success_criteria' => 'present|array',
-        ])->validate();
+        $data = validator($draft, SkillDraftRules::rules())->validate();
         if ($tenant <= 0 || ! str_starts_with($data['skill_key'], 'tenant.' . $tenant . '.')) {
             throw new SkillDomainException('scope_denied', 'Adoption can publish only a namespaced tenant version.');
         }

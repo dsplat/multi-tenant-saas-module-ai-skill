@@ -39,9 +39,13 @@ API：POST `/runs`、GET `/runs`及`/runs/{id}`、POST `/runs/{id}/advance|cance
 
 ## 候选采用与数据库发布
 
-租户主动训练/取消/候选裁决写API额外需 `setting.update`，目录权限不授训练采用权。训练任务登记、候选/推荐API已实现；**异步LLM训练处理器与独立评测尚未接齐**。UI明确“登记训练任务”，queued不代表模型已运行。测试用受控登记候选不代表真实模型闭环。
+租户主动训练/取消/候选裁决写API额外需 `setting.update`，目录权限不授训练采用权。训练任务登记、候选/推荐API已实现；异步LLM训练处理器（`SkillTrainer` + `RunSkillTrainingJob`，WP-147a）与独立评测器（`CandidateEvaluator` + `RunCandidateEvaluationJob`，WP-147b）代码已接齐，但由 `ai-skill.training.enabled` / `ai-skill.evaluation.enabled` 两个执行器开关驱动，默认关闭——**登记任务与真实烧token是两个动作**，开关未开时补记不投递、评测入口直接拒绝。UI明确“登记训练任务”，queued不代表模型已运行。测试用受控登记候选不代表真实模型闭环。
 
-`evaluate`只评估；`adopt`才可发布。AdoptionPolicy从持久化validation指向的 `baseline_definition_id` 读取可见、已发布且正文校验通过的基线，忽略HTTP提交的baseline/限定租户。自动采用至少要求非空证据、passed、留出样本≥10、评分≥0.8且不低于基线、严重错误=0、风险已知且只读/不扩工具范围。写变更或范围/确认变化需审；缺证据拒绝。这里的评测字段须由后续受控独立评测器写入，不能让模型自评；当前没有宣称评测闭环完成。
+采样窗口在登记时冻结：`TrainingDataset::freeze()` 把请求里的自由格式 manifest 归一成 `source_types/time_from/time_to/field_allowlist/max_samples/access_mode/authorized_tenant_id`，缺窗口即 `data_incomplete` 拒绝，`remote_url`/`file_path` 一律 `scope_denied`；训练器只能按该冻结窗口取证据，授权面不在执行时决定。可用来源见 `ExperienceSourceAdapter`：`audit_logs`、`agent_tool_logs`、`task_chain_runs`、`ai_audit_logs`、`skill_experiences`。
+
+`evaluate`只评估；`adopt`才可发布。AdoptionPolicy从持久化validation指向的 `baseline_definition_id` 读取可见、已发布且正文校验通过的基线，忽略HTTP提交的baseline/限定租户。自动采用至少要求非空证据、passed、留出样本≥10、评分≥0.8且不低于基线、严重错误=0、风险已知且只读/不扩工具范围。写变更或范围/确认变化需审；缺证据拒绝。
+
+**validation 的唯一写入方是 `CandidateEvaluator`**：训练器 `proposeCandidate` 只写空数组，任何 HTTP 路径都不接收 validation 字段（源码检索确认只有评测器在候选行锁下赋值）。判据本身由平台治理入口冻结在 `ai_skill_eval_cases`（Admin `POST /api/v1/admin/ai-skills/eval-cases`，需 `platform.ai.skill.manage` 与显式租户范围）：同一 `case_key` 摘要相同幂等、不同即 409 要求另起 `dataset_version`，断言只允许 `contains/not_contains/equals/required_tools/forbidden_tools`，不接受「让模型自己评」；审计只记引用与数量，不落样本正文。评测执行前逐条按 `content_sha256` 复核（改题即 `verification_missing`），执行后复核候选正文摘要（正文被改写则结果作废、不落 validation），写能力候选与非白名单工具在执行前拒绝且零token消耗。评分全为确定性断言，不用 LLM 给 LLM 打分。这仍不等于效果验收：本地用例只证明判据可信与门会拒，真实LLM候选与留出集测量见下方关闭门。
 
 CandidatePublication在候选行锁和同一事务内发布 `tenant.<tenant_id>.*` 新版本，生成数据库正文、SHA256及content_ref，绑定bound_definition_id后才标adopted。不能替租户发布公共module/project版本。目标版本已存在报409并回滚，不覆盖/重启停用版本；重复采用不重复创建，已裁决候选不能被训练重试覆盖。自动采用与运行授权分开。
 
@@ -49,7 +53,11 @@ CandidatePublication在候选行锁和同一事务内发布 `tenant.<tenant_id>.
 
 ## Admin公共版本与范围授权
 
-公共版本页已真实接线 `/api/v1/admin/ai-skills/versions` 和PATCH `/versions/{id}/status`，提供列表、乐观启停、冲突刷新与安全错误提示；不提供无审核的新版本发布按钮。管理按钮需 `platform.ai.skill.manage`，列表需view；后端再次检查平台Operator及权限，模块关闭时拒绝。Admin训练/审核页仍是禁用布局，不记为完成。
+公共版本页已真实接线 `/api/v1/admin/ai-skills/versions` 和PATCH `/versions/{id}/status`，提供列表、乐观启停、冲突刷新与安全错误提示；不提供无审核的新版本发布按钮。管理按钮需 `platform.ai.skill.manage`，列表需view；后端再次检查平台Operator及权限，模块关闭时拒绝。
+
+训练与审核页（`AiSkillAdminTraining.vue`，WP-147c）已从禁用布局改为真实入口，覆盖四件事：显式填写授权租户（无默认租户、空值不发请求）、按冻结窗口登记训练并回显运行事实（`GET /admin/ai-skills/training-runs`：状态、`llm_calls`、`cost_micro`/`cost_unknown`/`cost_source`、起止时间、失败原因）、在治理入口冻结判据并列出已冻结用例、对候选发起评测与请求采用/拒绝。客户端只做两件事：把不合规的窗口/断言挡在发出请求之前（缺起止时间、来源越清单、`metadata_only` 带正文字段、`transform_body` 无白名单、断言含 `llm_judge`），以及用 `contains` 断言不发送任何判定字段（`skill_draft`/`validation`/`risk`/跳过评测都不在请求体里）；裁决结论只回自服务端 AdoptionPolicy。切租户或换人员时旧请求晚返回会被代次计数器丢弃，不会把上一个租户的运行显示在当前页面上。
+
+判据冻结/列表（`/admin/ai-skills/eval-cases`）与评测触发（`/admin/ai-skills/candidates/{id}/evaluate`）与上述页面同权限同范围；页面接线不等于验收：真实后台会话、开关开启后的实际花费与效果测量仍是下方试点阻断门，未完成。
 
 新增增量权限迁移 `2026_10_15_000001_add_ai_skill_admin_permissions`，与PermissionSeeder一致，仅给super_admin/platform_admin全局角色，不授tenant_admin/member平台权限。
 
@@ -61,20 +69,21 @@ CandidatePublication在候选行锁和同一事务内发布 `tenant.<tenant_id>.
 
 本轮有真实Runner/ToolRegistry测试、HTTP伪造结果拒绝、采用与发布原子性/幂等、后台客户端及构建验证；精确结果见台账最新记录。**仍未完成**：真实浏览器、现场试点、L2可信确认适配、独立业务结果验证、真实LLM候选与评测、人工审核通过路径、SCRM活动页入口。MySQL并发锁门已在本机隔离库执行通过（见下方放行标准表与 `tests/AiSkillMySqlConcurrencyTest.php`）。旧HTTP测试接受浏览器pass=true的“闭环”已改为拒绝断言，不再作为BL-147完成证据。
 
-本轮最终本地回归：PHP170 tests / 598 assertions（含原Agent/Headless/任务链/角色权限），无失败，8项MySQL跳过、14项弃用提示；Console60、Admin24例；双端Element Plus、Console Bootstrap构建及全量架构守卫/Pint通过。隔离MySQL另跑 8 tests / 101 assertions 全绿。单测和构建不替代真实浏览器、跨仓消费与现场验收。
+本轮最终本地回归：PHP193 tests / 745 assertions（含原Agent/Headless/任务链/角色权限），无失败，8项MySQL跳过、14项弃用提示；WP-147a/b/c 专项42 tests / 184 assertions；Console60、Admin29例；双端Element Plus、Console Bootstrap、Admin三端构建及全量架构守卫/Pint通过；全量套件分4片复跑 5576 例通过 / 18432 断言 / 35 跳过 / 0 失败。隔离MySQL在 `DROP`+`CREATE` 复位（表数0）后的专用库重跑 8 tests / 102 assertions 全绿。单测和构建不替代真实浏览器、跨仓消费与现场验收。
 
 ## 必须执行的测试与放行标准
 
 | 测试门 | 执行要求 | 通过标准 / 当前状态 |
 |---|---|---|
-| PHP相关回归 | 执行下方根目录PHP回归命令 | 无失败；伪造结果/越权/过期版本拒绝、真实工具调用、原探索/确认入口不退化；本轮170项/598断言，8项MySQL跳过（须另按下方MySQL门真跑），不能视作全部环境已验收 |
-| 前端单测 | 分别进入 `resources/js/console`、`resources/js/admin` 执行 `npm test` | 本轮60/24项通过；检查不透明ID、错误脱敏、revision与API契约；客户端mock不证明实际页面可用 |
-| 构建 | Console `npm run build:element-plus`、`npm run build:bootstrap`；Admin `npm run build` | 均成功；模块路由与资源能解析，Bootstrap回退页面不复制业务逻辑 |
+| PHP相关回归 | 执行下方根目录PHP回归命令 | 无失败；伪造结果/越权/过期版本拒绝、真实工具调用、原探索/确认入口不退化；本轮193项/745断言，8项MySQL跳过（须另按下方MySQL门真跑），不能视作全部环境已验收 |
+| 训练与评测实现门（WP-147a/b/c） | `php artisan test tests/AiSkillTrainingTrainerTest.php tests/AiSkillCandidateEvaluationTest.php tests/AiSkillAdminApiTest.php tests/AiSkillTrainingApiTest.php` | 本轮42项/184断言全绿。全绿即证明：训练/评测投递受 `training.enabled`/`evaluation.enabled` 双开关门（关闭时 `Queue::assertNothingPushed`）；训练器永不写 validation、重复投递只领取一次、预算/窗口在执行前拒绝且零token、跨租户与非白名单工具丢弃而非入库、取消后事实仍落库；评测器是 validation 唯一写入方（源码检索确认）、冻结样本改题即 `verification_missing`、正文中途改写则结果作废、写能力/非白名单工具候选执行前拒绝、留出<10例拒绝、固定链路径 `llm_calls=0`/`orchestration_calls=0` 且无token结算；Admin判据冻结幂等、同 `case_key` 改断言409、断言字段白名单拒绝 `llm_judge`、审计不落样本正文、跨租户判据读取靠显式授权而非租户scope；Admin训练运行只读列表 `GET /admin/ai-skills/training-runs` 必带显式 `tenant_id`（缺失422、未授权403、无租户fallback），并把执行事实与状态分开显示：登记后未开启执行器时 `llm_calls` 为 null 且成本 `cost_unknown=true`，跑过才回 `llm_calls`/`cost_micro`/`cost_source`。**变异取证**：拆掉 `commit()` 正文摘要门 → 中途改写用例转红；拆掉冻结摘要复核 → 改题用例转红；拆掉 `withoutGlobalScopes()` → 跨租户读取用例返回0行转红。这些只证明判据可信与门会拒，不证明真实模型效果 |
+| 前端单测 | 分别进入 `resources/js/console`、`resources/js/admin` 执行 `npm test` | 本轮60/29项通过；检查不透明ID、错误脱敏、revision与API契约；Admin侧新增治理入口用例：空/0租户一律在发请求前拒绝、幂等键与冻结窗口原样上送、断言字段白名单在前端也拦 `llm_judge`、采用/拒绝请求体不含任何判定字段（`skill_draft`/`validation`/`risk`/跳过评测）、候选ID保持不透明字符串不做数值转换。客户端mock不证明实际页面可用 |
+| 构建 | Console `npm run build:element-plus`、`npm run build:bootstrap`；Admin `npm run build` | 均成功；模块路由与资源能解析，Bootstrap回退页面不复制业务逻辑。注意 `vite build` 不跑 vue-tsc，SFC 类型错误不会被本门捕获 |
 | 静态/文档 | `vendor/bin/pint --test`（本轮PHP文件）；`python3 scripts/architecture_guard.py --all`；`python3 scripts/gen_module_catalog.py --check`；`python3 scripts/docs_manifest.py --check`；`git diff --check` | 无新增失败，文档与目录登记一致；本轮通过 |
-| 隔离MySQL，发布阻断门 | 隔离实例执行真实迁移两次；8路同键start/采用、异输入、并发advance/cancel；注入发布失败和事务回滚（命令见下） | 只创建1个运行/发布版本；同键同输入重放、异输入409；旧revision不推进；不重复调用工具；失败不出现adopted却无绑定版本。旧B导入并发证据不能替代新C/D测试。本轮已在本机 MySQL 8.4.8 专用库 `multi_tenant_saas_test` 全绿：`AiSkillMySqlIntegrationTest` 3例/32断言 + `AiSkillMySqlConcurrencyTest` 5例/69断言（真实 HTTP + `pcntl_fork` 8路并发）；拆掉 `lockForUpdate` 的变异可复现 1062 重复键 5xx 与 8 路全 200，证明断言有牙齿。**脏库不作数**：残留行使迁移用例首跑假失败，须在干净实例上跑；生产实例现场迁移与试点仍未执行 |
-| 真实后台，试点阻断门 | 实际Admin/Console会话：目录→详情→私人/共享收藏；公共启停及409；真实只读运行/刷新/取消；切租户/换人员期间旧请求晚返回；无权限直接访问API | 同租户他人私人信息及跨租户信息均不可见；无默认租户；无执行权/训练管理权拒绝；损坏/停用版本不执行，真实页面无假成功；保存截图及HTTP/版本证据。本轮未完成 |
+| 隔离MySQL，发布阻断门 | 隔离实例执行真实迁移两次；8路同键start/采用、异输入、并发advance/cancel；注入发布失败和事务回滚（命令见下） | 只创建1个运行/发布版本；同键同输入重放、异输入409；旧revision不推进；不重复调用工具；失败不出现adopted却无绑定版本。旧B导入并发证据不能替代新C/D测试。本轮在**复位后的干净专用库**重跑全绿：本机 MySQL 8.4.8 `multi_tenant_saas_test` 先 `DROP`+`CREATE`（表数 0）再执行，`AiSkillMySqlIntegrationTest` 3例 + `AiSkillMySqlConcurrencyTest` 5例 = 8 tests / 102 assertions，0 失败 0 跳过；拆掉 `lockForUpdate` 的变异可复现 1062 重复键 5xx 与 8 路全 200，证明断言有牙齿。**脏库不作数**：残留行使迁移用例首跑假失败，须在干净实例上跑；生产实例现场迁移与试点仍未执行 |
+| 真实后台，试点阻断门 | 实际Admin/Console会话：目录→详情→私人/共享收藏；公共启停及409；真实只读运行/刷新/取消；切租户/换人员期间旧请求晚返回；无权限直接访问API；Admin训练页需走完「显式授权租户→登记训练→查看运行事实→冻结≥10例判据→发起评测→查看 validation→采用/拒绝」 | 同租户他人私人信息及跨租户信息均不可见；无默认租户；无执行权/训练管理权拒绝；损坏/停用版本不执行，真实页面无假成功；保存截图及HTTP/版本证据。入口页面与API本轮已接线（旧版是禁用布局），但真实浏览器会话仍未执行 |
 | 跨仓升级/回退，发布阻断门 | 实际split包与匹配核心≥2.13.1、Ai/AiSkill同步安装；SCRM构建；迁移/导入幂等；关闭新入口并回退匹配程序 | 提供者绑定、目录及权限正常，原助手/原链仍可用；不drop数据、不重放已执行动作。本轮未完成 |
-| 训练与效果，BL-147关闭门 | 受控真实LLM候选、独立评测、自动采用及需审核拒绝/通过；保留发现集外至少10例，同路径前后各3次 | 事实正确≥8/10且不低于基线，新增严重错误/越权/隐私泄露=0；固定路径编排LLM=0，可比编排调用减少≥50%；费用未知不宣称省钱。假样本/状态流转不证明效果；本轮未完成 |
+| 训练与效果，BL-147关闭门 | 受控真实LLM候选、独立评测、自动采用及需审核拒绝/通过；保留发现集外至少10例，同路径前后各3次 | 事实正确≥8/10且不低于基线，新增严重错误/越权/隐私泄露=0；固定路径编排LLM=0，可比编排调用减少≥50%；费用未知不宣称省钱。假样本/状态流转不证明效果；本轮未完成。已核实的现场前置（只读取证，未做任何写操作）：试点定为 `club.mtedu.com`，生产 vendor 落后一代（ai-skill `feabd18724`）、仅 `2026_10_13_000001` 已跑（batch 31）、`ai_skill_runs` 与本轮两张 `2026_10_16_*` 迁移未执行、`tenant_modules` 无该租户 ai-skill 行；证据面 `agent_tool_logs` 32 / `audit_logs` 50 / `ai_audit_logs` 50 行可用，`task_chain_runs`、`ai_skill_experiences` 为 0 行，故首轮真实训练只能取 `source_types: [audit_logs, ai_audit_logs, agent_tool_logs]` 的历史窗口；真实LLM可用（`AI_BAILIAN_API_KEY`/`AI_MODEL` 已配置，2026-10 用量 471,798 tokens）。开启顺序固定为：迁移→`tenant_modules` 物化→`ai-skill.enabled`→`platform_tenant_scopes`→`ai.task_chains.pinned_read_tools` 与 `ai-skill.*.tool_allowlist`→`training.enabled`→登记训练→冻结≥10例判据→`evaluation.enabled`→评测→采用；每步都要留 HTTP/DB 证据，费用未回算前 `cost_micro` 保持 null 并按 unknown 表述 |
 
 并发、浏览器、跨仓和训练效果任一对应门未通过，不能将其标记完成或开放对应试点。执行方交付命令、环境/版本、通过/失败/跳过数及失败证据；待办状态仅更新主台账 [backlog](../../../docs/governance/backlog.md)，不得以本文件另建第二份任务列表。
 
@@ -84,9 +93,13 @@ PHP回归命令（框架根目录）：
 vendor/bin/phpunit --filter 'AiSkill|TaskChainTest|RolePermissionSeederTest|AgentRuntimeTest|AgentRuntimeConfirmTest|HeadlessAgentTest|ModuleDependencyGateTest'
 ```
 
-隔离MySQL门命令（须指向专用测试库；库名不以 `_test`/`_testing` 结尾时 `TestCase` 会直接拒绝，防误清开发库）：
+隔离MySQL门命令（须指向专用测试库；库名不以 `_test`/`_testing` 结尾时 `TestCase` 会直接拒绝，防误清开发库）。**先复位隔离库再跑**：残留表会让 `AiSkillMySqlIntegrationTest` 的“全新安装”首跑假失败，脏库结果不作数；口令只从 `.env` 读进环境变量，不出现在命令行与记录里。
 
 ```bash
+export MYSQL_PWD="$(grep -E '^DB_PASSWORD=' .env | cut -d= -f2-)"
+mysql -h 127.0.0.1 -u "$(grep -E '^DB_USERNAME=' .env | cut -d= -f2-)" -e \
+  "DROP DATABASE IF EXISTS multi_tenant_saas_test; CREATE DATABASE multi_tenant_saas_test CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+
 TESTING_DB_CONNECTION=mysql DB_CONNECTION=mysql DB_HOST=127.0.0.1 DB_PORT=3306 \
 DB_DATABASE=<隔离库> DB_USERNAME=<测试账号> DB_PASSWORD=<测试口令> \
 php -d memory_limit=512M vendor/bin/phpunit \

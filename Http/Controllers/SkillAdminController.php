@@ -78,6 +78,22 @@ class SkillAdminController extends BaseController
         ]);
     }
 
+    public function trainingRuns(Request $request, SkillAdminService $admin)
+    {
+        $data = $request->validate([
+            'tenant_id' => 'required|integer|min:1',
+            'limit' => 'sometimes|integer|min:1|max:100',
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'data' => $admin->listTrainingRuns(
+                (int) $data['tenant_id'],
+                (int) ($data['limit'] ?? 20),
+            ),
+        ]);
+    }
+
     public function candidates(Request $request, SkillAdminService $admin)
     {
         $data = $request->validate([
@@ -108,6 +124,71 @@ class SkillAdminController extends BaseController
                 (int) $candidateId,
                 (string) $data['action'],
                 is_array($data['context'] ?? null) ? $data['context'] : [],
+            ),
+        ]);
+    }
+
+    public function evalCases(Request $request, SkillAdminService $admin)
+    {
+        $data = $request->validate([
+            'tenant_id' => 'required|integer|min:1',
+            'dataset_id' => 'required|string|max:100',
+            'dataset_version' => 'required|string|max:50',
+            'limit' => 'sometimes|integer|min:1|max:200',
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'data' => $admin->listEvalCases(
+                (int) $data['tenant_id'],
+                (string) $data['dataset_id'],
+                (string) $data['dataset_version'],
+                (int) ($data['limit'] ?? 50),
+            ),
+        ]);
+    }
+
+    public function freezeEvalCases(Request $request, SkillAdminService $admin)
+    {
+        $data = $request->validate([
+            'tenant_id' => 'required|integer|min:1',
+            'dataset_id' => 'required|string|max:100',
+            'dataset_version' => 'required|string|max:50',
+            'split' => 'required|in:discovery,validation',
+            'cases' => 'required|array|min:1|max:200',
+            'cases.*.skill_key' => 'required|string|max:100',
+            'cases.*.case_key' => 'required|string|max:64',
+            'cases.*.input' => 'required|array',
+            'cases.*.asserts' => 'required|array',
+            'cases.*.rubric_version' => 'sometimes|nullable|string|max:50',
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'data' => $admin->freezeEvalCases(
+                (int) $data['tenant_id'],
+                (string) $data['dataset_id'],
+                (string) $data['dataset_version'],
+                (string) $data['split'],
+                (array) $data['cases'],
+            ),
+        ]);
+    }
+
+    public function evaluateCandidate(Request $request, string $candidateId, SkillAdminService $admin)
+    {
+        $data = $request->validate([
+            'dataset_id' => 'required|string|max:100',
+            'dataset_version' => 'required|string|max:50',
+        ]);
+        validator(['candidate_id' => $candidateId], ['candidate_id' => 'required|integer|min:1'])->validate();
+
+        return response()->json([
+            'success' => true,
+            'data' => $admin->enqueueEvaluation(
+                (int) $candidateId,
+                (string) $data['dataset_id'],
+                (string) $data['dataset_version'],
             ),
         ]);
     }

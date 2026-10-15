@@ -11,6 +11,7 @@ use MultiTenantSaas\Modules\AiSkill\Contracts\SkillTrainingServiceContract;
 use MultiTenantSaas\Modules\AiSkill\DTOs\AdoptionDecision;
 use MultiTenantSaas\Modules\AiSkill\DTOs\RequestKey;
 use MultiTenantSaas\Modules\AiSkill\Exceptions\SkillDomainException;
+use MultiTenantSaas\Modules\AiSkill\Jobs\RunSkillTrainingJob;
 use MultiTenantSaas\Modules\AiSkill\Models\SkillCandidate;
 use MultiTenantSaas\Modules\AiSkill\Models\SkillTrainingRun;
 
@@ -38,9 +39,13 @@ final class SkillTrainingService implements SkillTrainingServiceContract
         $actor = $this->actor();
         $tenantId = (int) $actor['tenant_id'];
         $this->assertSpec($trainingSpec);
-        $fingerprint = $this->fingerprint($trainingSpec);
+        // 窗口在登记时冻结成规范键：授权面不能等到执行时再决定
+        $manifest = TrainingDataset::freeze((array) ($trainingSpec['dataset_manifest'] ?? []), $tenantId);
+        $spec = array_replace($trainingSpec, ['dataset_manifest' => $manifest]);
+        $fingerprint = $this->fingerprint($spec);
 
-        return DB::transaction(function () use ($trainingSpec, $requestKey, $tenantId, $actor, $fingerprint): array {
+        $created = null;
+        $result = DB::transaction(function () use ($manifest, $spec, $requestKey, $tenantId, $actor, $fingerprint, &$created): array {
             $existing = SkillTrainingRun::query()->where('tenant_id', $tenantId)
                 ->where('request_key', $requestKey->key)->lockForUpdate()->first();
             if ($existing !== null) {
@@ -58,23 +63,31 @@ final class SkillTrainingService implements SkillTrainingServiceContract
                 'tenant_id' => $tenantId,
                 'actor_type' => (string) ($actor['actor_type'] ?? 'operator'),
                 'actor_id' => (int) ($actor['actor_id'] ?? 0),
-                'mode' => (string) $trainingSpec['mode'],
-                'dataset_manifest' => $trainingSpec['dataset_manifest'] ?? [],
-                'config_fingerprint' => (string) ($trainingSpec['config_fingerprint'] ?? ''),
-                'prompt_fingerprint' => (string) ($trainingSpec['prompt_fingerprint'] ?? ''),
-                'model_ref' => $trainingSpec['model_ref'] ?? null,
-                'budget' => $trainingSpec['budget'] ?? null,
-                'cost_micro' => $trainingSpec['cost_micro'] ?? null,
+                'mode' => (string) $spec['mode'],
+                'dataset_manifest' => $manifest,
+                'config_fingerprint' => (string) ($spec['config_fingerprint'] ?? ''),
+                'prompt_fingerprint' => (string) ($spec['prompt_fingerprint'] ?? ''),
+                'model_ref' => $spec['model_ref'] ?? null,
+                'budget' => $spec['budget'] ?? null,
+                'cost_micro' => $spec['cost_micro'] ?? null,
                 'status' => SkillTrainingRun::STATUS_QUEUED,
                 'request_key' => $requestKey->key,
                 'input_fingerprint' => $fingerprint,
             ]);
+            $created = (int) $run->getKey();
 
             return [
                 'training_run_id' => (string) $run->getKey(),
                 'status' => (string) $run->status,
             ];
         }, 3);
+
+        // 只在事务提交后派发；执行器默认关闭（试点开关），同步驱动下不会误跑
+        if ($created !== null && config('ai-skill.training.enabled') === true) {
+            RunSkillTrainingJob::dispatch($created, $tenantId);
+        }
+
+        return $result;
     }
 
     /**
@@ -130,24 +143,25 @@ final class SkillTrainingService implements SkillTrainingServiceContract
     }
 
     /**
-     * 登记候选（训练 job / 测试夹具调用）。模型输出不能直接执行。
+     * 登记候选（训练处理器唯一写入路径；无 HTTP 入口）。
+     *
+     * 授权事实取自已入库的 run 行（enqueue 时已校验 actor/tenant），因此后台 worker 与
+     * Web 路径共用同一条判据；本方法**不接收 validation**：判据只能由独立评测器写入，
+     * 候选生成方无法自评。正文变化会清空既有 validation，必须重新评测。
      *
      * @param  array<string, mixed>  $skillDraft
-     * @param  array<string, mixed>  $evidenceRefs
-     * @param  array<string, mixed>  $validation
+     * @param  list<string>  $evidenceRefs
      * @return array<string, mixed>
      */
-    public function proposeCandidate(
-        int $trainingRunId,
-        string $candidateKey,
-        array $skillDraft,
-        array $evidenceRefs,
-        array $validation,
-    ): array {
-        return DB::transaction(function () use ($trainingRunId, $candidateKey, $skillDraft, $evidenceRefs, $validation): array {
-            $run = $this->lockRun($trainingRunId);
-            if ($run->status === SkillTrainingRun::STATUS_CANCELLED) {
-                throw new SkillDomainException('version_conflict', 'Training run is cancelled.');
+    public function proposeCandidate(int $trainingRunId, string $candidateKey, array $skillDraft, array $evidenceRefs): array
+    {
+        return DB::transaction(function () use ($trainingRunId, $candidateKey, $skillDraft, $evidenceRefs): array {
+            $run = SkillTrainingRun::withoutGlobalScopes()->whereKey($trainingRunId)->lockForUpdate()->first();
+            if ($run === null || (int) $run->tenant_id <= 0) {
+                throw new SkillDomainException('scope_denied', 'Training run not found.');
+            }
+            if (in_array((string) $run->status, [SkillTrainingRun::STATUS_CANCELLED, SkillTrainingRun::STATUS_FAILED], true)) {
+                throw new SkillDomainException('version_conflict', 'A closed training run cannot register candidates.');
             }
 
             $existing = SkillCandidate::withoutGlobalScopes()->where('training_run_id', $run->getKey())
@@ -164,10 +178,8 @@ final class SkillTrainingService implements SkillTrainingServiceContract
                     'tenant_id' => $run->tenant_id,
                     'skill_draft' => $skillDraft,
                     'evidence_refs' => $evidenceRefs,
-                    'validation' => $validation,
-                    'status' => ($validation['passed'] ?? false) === true
-                        ? SkillCandidate::STATUS_VALIDATED
-                        : SkillCandidate::STATUS_PROPOSED,
+                    'validation' => [],
+                    'status' => SkillCandidate::STATUS_PROPOSED,
                 ],
             );
 
@@ -273,15 +285,7 @@ final class SkillTrainingService implements SkillTrainingServiceContract
         if (! is_array($manifest) || $manifest === []) {
             throw new SkillDomainException('data_incomplete', 'dataset_manifest is required.');
         }
-        // 来源必须显式授权，禁止自由 URL / 文件系统路径
-        foreach ((array) ($manifest['source_types'] ?? []) as $source) {
-            if (! is_string($source) || ! preg_match('/^[a-z0-9_]+$/D', $source)) {
-                throw new SkillDomainException('scope_denied', 'Invalid dataset source.');
-            }
-        }
-        if (isset($manifest['remote_url']) || isset($manifest['file_path'])) {
-            throw new SkillDomainException('scope_denied', 'Remote URL or filesystem path is not allowed.');
-        }
+        // 来源合法性、窗口显式性由 TrainingDataset::freeze 在同一次登记里判定
         $budget = $spec['budget'] ?? null;
         if ($budget !== null) {
             if (! is_array($budget)) {
@@ -347,6 +351,12 @@ final class SkillTrainingService implements SkillTrainingServiceContract
             // 成本缺失显示 unknown，不显示 0
             'cost_micro' => $run->cost_micro,
             'cost_unknown' => $run->costIsUnknown(),
+            // 执行事实：效果门要能区分「模型真跑过」与「状态流转过」
+            'llm_calls' => $run->llm_calls,
+            'usage' => $run->usage,
+            'cost_source' => $run->cost_source,
+            'started_at' => $run->started_at?->toISOString(),
+            'finished_at' => $run->finished_at?->toISOString(),
             'error' => $run->error,
             'created_at' => $run->created_at?->toISOString(),
             'updated_at' => $run->updated_at?->toISOString(),

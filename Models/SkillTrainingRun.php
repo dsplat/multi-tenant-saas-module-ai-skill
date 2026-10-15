@@ -60,6 +60,11 @@ class SkillTrainingRun extends Model
         return [
             'dataset_manifest' => 'array',
             'budget' => 'array',
+            // 训练事实只读：由处理器/作业写入，不进入批量赋值白名单
+            'usage' => 'array',
+            'llm_calls' => 'integer',
+            'started_at' => 'datetime',
+            'finished_at' => 'datetime',
             'cost_micro' => 'integer',
             'actor_id' => 'integer',
             'tenant_id' => 'integer',

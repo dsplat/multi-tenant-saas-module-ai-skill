@@ -59,19 +59,19 @@ CandidatePublication在候选行锁和同一事务内发布 `tenant.<tenant_id>.
 
 备份→增量迁移（运行、训练request_key、推荐事件、平台权限）→匹配核心/Ai/AiSkill包→SCRM锁文件→种子导入→Admin/Console构建→缓存/队列。默认关闭，显式试点范围与工具白名单经核验后开放；不得因本地测试通过自动生产启用。回退关入口/训练并保留数据，不drop表、不重做已发生动作。
 
-本轮有真实Runner/ToolRegistry测试、HTTP伪造结果拒绝、采用与发布原子性/幂等、后台客户端及构建验证；精确结果见台账最新记录。**仍未完成**：真实浏览器、MySQL并发锁/现场试点、L2可信确认适配、独立业务结果验证、真实LLM候选与评测、人工审核通过路径、SCRM活动页入口。旧HTTP测试接受浏览器pass=true的“闭环”已改为拒绝断言，不再作为BL-147完成证据。
+本轮有真实Runner/ToolRegistry测试、HTTP伪造结果拒绝、采用与发布原子性/幂等、后台客户端及构建验证；精确结果见台账最新记录。**仍未完成**：真实浏览器、现场试点、L2可信确认适配、独立业务结果验证、真实LLM候选与评测、人工审核通过路径、SCRM活动页入口。MySQL并发锁门已在本机隔离库执行通过（见下方放行标准表与 `tests/AiSkillMySqlConcurrencyTest.php`）。旧HTTP测试接受浏览器pass=true的“闭环”已改为拒绝断言，不再作为BL-147完成证据。
 
-本轮最终本地回归：PHP165 tests / 598 assertions（含原Agent/Headless/任务链/角色权限），无失败，3项MySQL跳过、14项弃用提示；Console60、Admin24例；双端Element Plus、Console Bootstrap构建及全量架构守卫/Pint通过。单测和构建不替代真实浏览器、跨仓消费与现场验收。
+本轮最终本地回归：PHP170 tests / 598 assertions（含原Agent/Headless/任务链/角色权限），无失败，8项MySQL跳过、14项弃用提示；Console60、Admin24例；双端Element Plus、Console Bootstrap构建及全量架构守卫/Pint通过。隔离MySQL另跑 8 tests / 101 assertions 全绿。单测和构建不替代真实浏览器、跨仓消费与现场验收。
 
 ## 必须执行的测试与放行标准
 
 | 测试门 | 执行要求 | 通过标准 / 当前状态 |
 |---|---|---|
-| PHP相关回归 | 执行下方根目录PHP回归命令 | 无失败；伪造结果/越权/过期版本拒绝、真实工具调用、原探索/确认入口不退化；本轮165项/598断言，3项MySQL跳过，不能视作全部环境已验收 |
+| PHP相关回归 | 执行下方根目录PHP回归命令 | 无失败；伪造结果/越权/过期版本拒绝、真实工具调用、原探索/确认入口不退化；本轮170项/598断言，8项MySQL跳过（须另按下方MySQL门真跑），不能视作全部环境已验收 |
 | 前端单测 | 分别进入 `resources/js/console`、`resources/js/admin` 执行 `npm test` | 本轮60/24项通过；检查不透明ID、错误脱敏、revision与API契约；客户端mock不证明实际页面可用 |
 | 构建 | Console `npm run build:element-plus`、`npm run build:bootstrap`；Admin `npm run build` | 均成功；模块路由与资源能解析，Bootstrap回退页面不复制业务逻辑 |
 | 静态/文档 | `vendor/bin/pint --test`（本轮PHP文件）；`python3 scripts/architecture_guard.py --all`；`python3 scripts/gen_module_catalog.py --check`；`python3 scripts/docs_manifest.py --check`；`git diff --check` | 无新增失败，文档与目录登记一致；本轮通过 |
-| 隔离MySQL，发布阻断门 | 隔离实例执行真实迁移两次；8路同键start/采用、异输入、并发advance/cancel；注入发布失败和事务回滚 | 只创建1个运行/发布版本；同键同输入重放、异输入409；旧revision不推进；不重复调用工具；失败不出现adopted却无绑定版本。旧B导入并发证据不能替代新C/D测试；本轮未完成 |
+| 隔离MySQL，发布阻断门 | 隔离实例执行真实迁移两次；8路同键start/采用、异输入、并发advance/cancel；注入发布失败和事务回滚（命令见下） | 只创建1个运行/发布版本；同键同输入重放、异输入409；旧revision不推进；不重复调用工具；失败不出现adopted却无绑定版本。旧B导入并发证据不能替代新C/D测试。本轮已在本机 MySQL 8.4.8 专用库 `multi_tenant_saas_test` 全绿：`AiSkillMySqlIntegrationTest` 3例/32断言 + `AiSkillMySqlConcurrencyTest` 5例/69断言（真实 HTTP + `pcntl_fork` 8路并发）；拆掉 `lockForUpdate` 的变异可复现 1062 重复键 5xx 与 8 路全 200，证明断言有牙齿。**脏库不作数**：残留行使迁移用例首跑假失败，须在干净实例上跑；生产实例现场迁移与试点仍未执行 |
 | 真实后台，试点阻断门 | 实际Admin/Console会话：目录→详情→私人/共享收藏；公共启停及409；真实只读运行/刷新/取消；切租户/换人员期间旧请求晚返回；无权限直接访问API | 同租户他人私人信息及跨租户信息均不可见；无默认租户；无执行权/训练管理权拒绝；损坏/停用版本不执行，真实页面无假成功；保存截图及HTTP/版本证据。本轮未完成 |
 | 跨仓升级/回退，发布阻断门 | 实际split包与匹配核心≥2.13.1、Ai/AiSkill同步安装；SCRM构建；迁移/导入幂等；关闭新入口并回退匹配程序 | 提供者绑定、目录及权限正常，原助手/原链仍可用；不drop数据、不重放已执行动作。本轮未完成 |
 | 训练与效果，BL-147关闭门 | 受控真实LLM候选、独立评测、自动采用及需审核拒绝/通过；保留发现集外至少10例，同路径前后各3次 | 事实正确≥8/10且不低于基线，新增严重错误/越权/隐私泄露=0；固定路径编排LLM=0，可比编排调用减少≥50%；费用未知不宣称省钱。假样本/状态流转不证明效果；本轮未完成 |
@@ -83,3 +83,14 @@ PHP回归命令（框架根目录）：
 ```bash
 vendor/bin/phpunit --filter 'AiSkill|TaskChainTest|RolePermissionSeederTest|AgentRuntimeTest|AgentRuntimeConfirmTest|HeadlessAgentTest|ModuleDependencyGateTest'
 ```
+
+隔离MySQL门命令（须指向专用测试库；库名不以 `_test`/`_testing` 结尾时 `TestCase` 会直接拒绝，防误清开发库）：
+
+```bash
+TESTING_DB_CONNECTION=mysql DB_CONNECTION=mysql DB_HOST=127.0.0.1 DB_PORT=3306 \
+DB_DATABASE=<隔离库> DB_USERNAME=<测试账号> DB_PASSWORD=<测试口令> \
+php -d memory_limit=512M vendor/bin/phpunit \
+  tests/AiSkillMySqlIntegrationTest.php tests/AiSkillMySqlConcurrencyTest.php
+```
+
+实测：`TESTING_DB_CONNECTION=mysql` 缺省时 `TestCase` 钉回 sqlite、用例静默跳过（1 skipped），设置后即真实连 MySQL（PHP CLI 会填 `$_SERVER`，无需额外 `php -d` 开关）。库名守卫只放行 `_test`/`_testing` 结尾或 `TESTING_ALLOWED_MYSQL_DATABASES` 显式列出的库。

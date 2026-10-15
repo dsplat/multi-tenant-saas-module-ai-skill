@@ -51,6 +51,8 @@ class SkillTrainingRun extends Model
         'cost_micro',
         'status',
         'error',
+        'request_key',
+        'input_fingerprint',
     ];
 
     protected function casts(): array
@@ -60,6 +62,8 @@ class SkillTrainingRun extends Model
             'budget' => 'array',
             'cost_micro' => 'integer',
             'actor_id' => 'integer',
+            'tenant_id' => 'integer',
+            'training_run_id' => 'integer',
         ];
     }
 

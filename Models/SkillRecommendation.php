@@ -29,9 +29,11 @@ class SkillRecommendation extends Model
         'candidate_id',
         'position',
         'exposed_at',
+        'clicked_at',
         'adopted_at',
         'ignored_at',
         'executed_at',
+        'completed_at',
         'reason',
     ];
 
@@ -41,12 +43,16 @@ class SkillRecommendation extends Model
             'context_ref' => 'array',
             'reason' => 'array',
             'exposed_at' => 'datetime',
+            'clicked_at' => 'datetime',
             'adopted_at' => 'datetime',
             'ignored_at' => 'datetime',
             'executed_at' => 'datetime',
+            'completed_at' => 'datetime',
             'visible_actor_id' => 'integer',
             'candidate_id' => 'integer',
             'position' => 'integer',
+            'tenant_id' => 'integer',
+            'recommendation_id' => 'integer',
         ];
     }
 

@@ -59,4 +59,19 @@ class SkillFavorite extends Model
     {
         return $this->scope === self::SCOPE_TENANT;
     }
+
+    /**
+     * 主键以字符串序列化（与 SkillDefinition 一致）：超出 JS 安全整数的全局 ID
+     * 必须作为不透明字符串交给前端，禁止 Number 往返。
+     */
+    public function toArray(): array
+    {
+        $array = parent::toArray();
+        $key = $this->getKeyName();
+        if (array_key_exists($key, $array) && $array[$key] !== null) {
+            $array[$key] = (string) $array[$key];
+        }
+
+        return $array;
+    }
 }

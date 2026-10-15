@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MultiTenantSaas\Modules\AiSkill\Exceptions;
 
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use MultiTenantSaas\Exceptions\DomainException;
 use MultiTenantSaas\Modules\AiSkill\DTOs\ReasonCode;
 
@@ -29,5 +31,18 @@ class SkillDomainException extends DomainException
             default => 422,
         };
         parent::__construct($message !== '' ? $message : $reason, 0, $previous);
+    }
+
+    /**
+     * 稳定错误契约：`{success:false,message,reason}`。
+     * reason 必达（A 包冻结枚举），供前端适配器映射；不泄漏 SQL/路径/堆栈。
+     */
+    public function render(Request $request): JsonResponse
+    {
+        return response()->json([
+            'success' => false,
+            'message' => $this->getMessage() !== '' ? $this->getMessage() : $this->reason,
+            'reason' => $this->reason,
+        ], $this->getStatusCode());
     }
 }

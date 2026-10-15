@@ -10,7 +10,7 @@
   },
   "require": {
     "php": "^8.3",
-    "dsplat/multi-tenant-saas": "^2.13",
+    "dsplat/multi-tenant-saas": "^2.13.1",
     "dsplat/multi-tenant-saas-module-ai": "^2.0"
   },
   "extra": {
@@ -21,7 +21,7 @@
         "ai"
       ],
       "conflicts": [],
-      "requires_core": ">=2.13.0",
+      "requires_core": ">=2.13.1",
       "provider": "MultiTenantSaas\\Modules\\AiSkill\\AiSkillServiceProvider",
       "tenant_toggleable": true,
       "module_loadable": true

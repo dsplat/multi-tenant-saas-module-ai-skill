@@ -17,10 +17,19 @@ class AiSkillServiceProvider extends ModuleServiceProvider
     protected function registerModuleBindings(): void
     {
         // Catalog permission must not become an implicit training/execution authorization.
-        $this->app->when([Services\SkillCatalog::class, Services\SkillFavoriteService::class])
-            ->needs(Contracts\ActorResolverContract::class)->give(Services\OperatorActorResolver::class);
+        $this->app->when([
+            Services\SkillCatalog::class,
+            Services\SkillFavoriteService::class,
+            Services\SkillExecutionService::class,
+            Services\SkillTrainingService::class,
+            Services\SkillRecommendationService::class,
+        ])->needs(Contracts\ActorResolverContract::class)->give(Services\OperatorActorResolver::class);
         $this->app->bind(Contracts\FavoriteAccessPolicyContract::class, Services\FavoriteAccessPolicy::class);
         $this->app->bind(Contracts\SkillFavoriteServiceContract::class, Services\SkillFavoriteService::class);
+        $this->app->bind(Contracts\SkillExecutionServiceContract::class, Services\SkillExecutionService::class);
+        $this->app->bind(Contracts\AdoptionPolicyContract::class, Services\AdoptionPolicy::class);
+        $this->app->bind(Contracts\SkillTrainingServiceContract::class, Services\SkillTrainingService::class);
+        $this->app->bind(Contracts\SkillRecommendationServiceContract::class, Services\SkillRecommendationService::class);
     }
 
     protected function registerModuleCommands(): void

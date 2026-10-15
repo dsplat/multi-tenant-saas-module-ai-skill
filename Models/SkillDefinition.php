@@ -139,6 +139,21 @@ class SkillDefinition extends Model
     }
 
     /**
+     * 主键以字符串序列化：HasGlobalId 为 16 位随机数字，可能超出 JS Number.MAX_SAFE_INTEGER，
+     * 前端一律作不透明引用，禁止 Number 强转（见 ai-skill-backoffice-playbook §4.1）。
+     */
+    public function toArray(): array
+    {
+        $array = parent::toArray();
+        $key = $this->getKeyName();
+        if (array_key_exists($key, $array) && $array[$key] !== null) {
+            $array[$key] = (string) $array[$key];
+        }
+
+        return $array;
+    }
+
+    /**
      * 已发布版本禁止原地改语义字段（应用层硬门；库层由集成者酌情加触发器）。
      */
     public function isImmutableSemantic(): bool

@@ -6,6 +6,7 @@ namespace MultiTenantSaas\Modules\AiSkill\Services;
 
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use JsonException;
 use MultiTenantSaas\Contracts\AiTextServiceContract;
 use MultiTenantSaas\Contracts\UsageSettlementContract;
 use MultiTenantSaas\Modules\AiSkill\DTOs\AuthorizedDatasetSpec;
@@ -244,7 +245,11 @@ final class SkillTrainer
      */
     private function parseDrafts(SkillTrainingRun $run, string $content): array
     {
-        $decoded = json_decode($this->extractJson($content), true, 512, JSON_THROW_ON_ERROR);
+        try {
+            $decoded = json_decode($this->extractJson($content), true, 512, JSON_THROW_ON_ERROR);
+        } catch (JsonException $e) {
+            throw new SkillDomainException('data_incomplete', 'Model response is not valid JSON.', previous: $e);
+        }
         $items = is_array($decoded) ? ($decoded['candidates'] ?? null) : null;
         if (! is_array($items)) {
             throw new SkillDomainException('data_incomplete', 'Model response has no candidates list.');
@@ -390,7 +395,8 @@ final class SkillTrainer
 
     private function markFailed(SkillTrainingRun $run, \Throwable $e): void
     {
-        $reason = $e instanceof SkillDomainException ? $e->getMessage() : 'Training execution failed.';
+        // 训练记录只有 error 文本列：保留领域原因码，不持久化异常链或模型原文。
+        $reason = $e instanceof SkillDomainException ? $e->reason . ': ' . $e->getMessage() : 'Training execution failed.';
         Log::warning('[AiSkill] 训练任务执行失败', [
             'training_run_id' => (int) $run->getKey(),
             'tenant_id' => (int) $run->tenant_id,

@@ -107,3 +107,67 @@ php -d memory_limit=512M vendor/bin/phpunit \
 ```
 
 实测：`TESTING_DB_CONNECTION=mysql` 缺省时 `TestCase` 钉回 sqlite、用例静默跳过（1 skipped），设置后即真实连 MySQL（PHP CLI 会填 `$_SERVER`，无需额外 `php -d` 开关）。库名守卫只放行 `_test`/`_testing` 结尾或 `TESTING_ALLOWED_MYSQL_DATABASES` 显式列出的库。
+
+## 发布与升级流程（2026-10-16 排定，未执行完毕）
+
+| 步 | 动作 | 通过标准 | 状态 |
+|---|---|---|---|
+| R1 | `git push origin main` | 5 个本地提交上远端 | **阻塞：本机 github.com:443 不通** |
+| R2 | CI `split.yml` 全池拆包 | 各 `dsplat/multi-tenant-saas-module-*` 分支更新，含 ai / ai-skill / ai-streaming | 待 R1 |
+| R3 | SCRM `composer update` + 提交 `composer.lock` | vendor 追上 `c3ebc33c` 一代；核心 ≥2.13 | 待 R2 |
+| R4 | 生产增量部署 + 迁移 | `ai_skill_runs`、`2026_10_16_*`、`make_ai_request_cost_nullable` 均 Ran | 待 R3 |
+| R5 | 种子导入 + 权限播种 | `platform.ai.skill.view/manage`；Skill 正文摘要一致 | 待 R4 |
+| R6 | 试点启用（严格顺序） | 见下方测试计划 P0 | 待 R5 |
+| R7 | 回退演练 | 关 `ai-skill.enabled` / training / evaluation，旧助手可用，不 drop | 与 R6 同场 |
+
+**回退**：关新开关与新入口，保留数据与已发生动作；程序按版本回退，不重放业务。
+
+## 试点测试计划（club.mtedu.com）
+
+**原则**：每步留 HTTP/DB 证据；失败即停；不把登记当执行、不把点击当成功；`cost_unknown` 不宣称省钱。
+
+### P0 启用与门控（发布阻断）
+
+1. 迁移可重复执行两次 → 第二次 0 新表  
+2. `tenant_modules` 物化 ai-skill 行（fail-closed）  
+3. `ai-skill.enabled=true` → 目录/详情 200；匿名 401；外租户 403  
+4. 未开 `training.enabled` 时登记训练不推队列  
+5. 工具白名单 / `platform_tenant_scopes` 按显式租户配置  
+
+### P1 Console 租户面
+
+| # | 场景 | 期望 |
+|---|---|---|
+| 1 | 目录→详情→个人收藏→共享收藏 | 有界列表；正文损坏标不可用；共享写需 setting.update |
+| 2 | 版本停用→收藏失效→409 刷新 | 不静默换新版 |
+| 3 | 固定执行 start→advance→完成 | 摘要钉定；revision 冲突 409；取消不可重放 |
+| 4 | 推荐生成→曝光/点击/采用/执行/完成 | 事件分列；grants_execution=false |
+| 5 | 切租户/登出 | 旧缓存丢弃；私人收藏不残留 |
+
+### P2 Admin 治理面
+
+| # | 场景 | 期望 |
+|---|---|---|
+| 1 | 公共版本列表/启停 | 默认不列全租户；409 不覆盖 |
+| 2 | 显式 tenant_id 登记训练 | 缺 422；未授权 403；无 fallback |
+| 3 | 冻结 ≥10 判据→评测→采用/拒绝 | 需审不自动 adopted |
+| 4 | 成本显示 | 未跑 = unknown，跑过才计 |
+
+### P3 真实 LLM 闭环（BL-147 关闭门）
+
+1. history 窗口 `[audit_logs, ai_audit_logs, agent_tool_logs]` 登记训练  
+2. 冻结留出 **≥10** 例（不参与训练）  
+3. 评测：事实正确 **≥8/10** 且不低于基线  
+4. 至少 1 例 auto 采用 + 1 例 needs_review 拒绝  
+5. 固定路径编排 LLM=**0**；可比编排调用减半  
+6. 0 新增严重错误/越权/隐私泄露  
+
+### P4 回退
+
+关 training/evaluation/ai-skill 入口 → 旧小秘书与链路可用 → 已执行 run 保持终态不重放。
+
+### 测试计划与放行门的关系
+
+- 上表 P0–P2 对应「真实后台 / 跨仓」放行门；P3 对应 BL-147 关闭门。  
+- 本地 PHP/前端/构建/隔离 MySQL 门已在上表执行完毕，**不能替代** P0–P4。  
+- 执行结果回填 [backlog](../../../docs/governance/backlog.md) 与 LEDGER，不另建第二任务表。

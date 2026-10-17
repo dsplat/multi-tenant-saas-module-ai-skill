@@ -35,16 +35,6 @@ class SkillRun extends Model
 
     public const STATUS_UNCERTAIN = 'uncertain';
 
-    public const OUTCOME_SUCCESS = 'success';
-
-    public const OUTCOME_INCOMPLETE = 'incomplete';
-
-    public const OUTCOME_FAILED = 'failed';
-
-    public const OUTCOME_CANCELLED = 'cancelled';
-
-    public const OUTCOME_UNCERTAIN = 'uncertain';
-
     protected $table = 'ai_skill_runs';
 
     protected $primaryKey = 'skill_run_id';

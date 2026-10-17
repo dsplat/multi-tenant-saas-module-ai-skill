@@ -8,7 +8,6 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use MultiTenantSaas\Contracts\AiTextServiceContract;
 use MultiTenantSaas\Contracts\TaskChainHarnessContract;
-use MultiTenantSaas\Contracts\UsageSettlementContract;
 use MultiTenantSaas\Modules\AiSkill\Exceptions\SkillDomainException;
 use MultiTenantSaas\Modules\AiSkill\Models\SkillCandidate;
 use MultiTenantSaas\Modules\AiSkill\Models\SkillDefinition;
@@ -38,13 +37,9 @@ final class CandidateEvaluator
     /** 被测执行自身消耗的 LLM 调用：固定只读链应为 0，这是效果门的关键事实 */
     private int $orchestrationCalls = 0;
 
-    /** @var array<string, mixed> */
-    private array $usage = [];
-
     public function __construct(
         private readonly TaskChainHarnessContract $harness,
         private readonly AiTextServiceContract $llm,
-        private readonly UsageSettlementContract $settlements,
     ) {}
 
     /**
@@ -54,7 +49,6 @@ final class CandidateEvaluator
     {
         $this->llmCalls = 0;
         $this->orchestrationCalls = 0;
-        $this->usage = [];
 
         $plan = $this->prepare($candidateId, $datasetId, $datasetVersion);
         if ($plan === null) {
@@ -62,7 +56,6 @@ final class CandidateEvaluator
         }
 
         $results = $this->executeCases($plan);
-        $this->settle($plan);
 
         return $this->commit($plan, $results) ? 'completed' : 'skipped';
     }
@@ -290,23 +283,6 @@ final class CandidateEvaluator
         ]), $input, (int) $plan['tenant_id']);
     }
 
-    private function settle(array $plan): void
-    {
-        $input = (int) ($this->usage['input_tokens'] ?? 0);
-        $output = (int) ($this->usage['output_tokens'] ?? 0);
-        if ($input <= 0 && $output <= 0) {
-            return;
-        }
-        $this->settlements->settle(
-            substr(hash('sha1', 'aiskill-evaluation|' . $plan['tenant_id'] . '|' . $plan['candidate_id'] . '|' . $plan['manifest_sha']), 0, 32),
-            self::USAGE_KIND,
-            (int) $plan['tenant_id'],
-            null,
-            $input,
-            $output,
-        );
-    }
-
     /**
      * 固定链执行：只经 harness，不接受客户端回填，步骤全部由服务端工具产出。
      *
@@ -360,11 +336,6 @@ final class CandidateEvaluator
         }
         $this->llmCalls++;
         $this->orchestrationCalls++;
-        $usage = $response->usage;
-        $this->usage = [
-            'input_tokens' => (int) ($this->usage['input_tokens'] ?? 0) + (int) ($usage['input_tokens'] ?? $usage['prompt_tokens'] ?? 0),
-            'output_tokens' => (int) ($this->usage['output_tokens'] ?? 0) + (int) ($usage['output_tokens'] ?? $usage['completion_tokens'] ?? 0),
-        ];
 
         return [
             'outputs' => ['answer' => $response->content],

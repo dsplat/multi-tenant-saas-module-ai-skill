@@ -17,6 +17,8 @@ final class CandidatePublication
             return SkillDefinition::whereKey($candidate->bound_definition_id)->firstOrFail();
         }
         $draft = (array) $candidate->skill_draft;
+        // 发布前证据必须仍然指这份草稿（AUTO 与人审同一关，见 SkillDraftRules）。
+        SkillDraftRules::assertCurrentEvaluationEvidence($draft, (array) $candidate->validation);
         $tenant = (int) $candidate->tenant_id;
         $data = validator($draft, SkillDraftRules::rules())->validate();
         if ($tenant <= 0 || ! str_starts_with($data['skill_key'], 'tenant.' . $tenant . '.')) {

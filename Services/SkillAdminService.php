@@ -294,17 +294,11 @@ final class SkillAdminService
     private function assertIndependentReviewEvidence(SkillCandidate $candidate): void
     {
         $draft = (array) $candidate->skill_draft;
-        $evaluation = (array) ($candidate->validation['evaluation'] ?? []);
-        if (($draft['risk']['business_write'] ?? null) !== false
-            || ($evaluation['evidence_level'] ?? null) !== CandidateEvaluator::EVIDENCE_LEVEL
-            || ! is_string($evaluation['draft_sha256'] ?? null)
-            || ! hash_equals($evaluation['draft_sha256'], SkillDraftRules::fingerprint($draft))
-            || ! is_string($evaluation['manifest_sha256'] ?? null)
-            || ! preg_match('/^[a-f0-9]{64}$/D', $evaluation['manifest_sha256'])
-            || empty($evaluation['dataset_id']) || empty($evaluation['dataset_version'])
-            || empty($evaluation['rubric_version']) || empty($evaluation['evaluator_version'])) {
+        if (($draft['risk']['business_write'] ?? null) !== false) {
             throw new SkillDomainException('verification_missing', 'Human approval requires current independent read-only evaluation evidence.');
         }
+        // 证据时效/绑定口径唯一在 SkillDraftRules（发布咽喉同样用它），这里只多加人审的只读要求。
+        SkillDraftRules::assertCurrentEvaluationEvidence($draft, (array) $candidate->validation);
     }
 
     /**

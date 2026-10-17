@@ -9,6 +9,7 @@ use MultiTenantSaas\Contracts\PermissionCheckerContract;
 use MultiTenantSaas\Contracts\TaskChainHarnessContract;
 use MultiTenantSaas\Modules\AiSkill\Contracts\ActorResolverContract;
 use MultiTenantSaas\Modules\AiSkill\Contracts\SkillExecutionServiceContract;
+use MultiTenantSaas\Modules\AiSkill\DTOs\Outcome;
 use MultiTenantSaas\Modules\AiSkill\DTOs\OutcomeVerification;
 use MultiTenantSaas\Modules\AiSkill\DTOs\RequestKey;
 use MultiTenantSaas\Modules\AiSkill\DTOs\SkillRunView;
@@ -142,7 +143,7 @@ final class SkillExecutionService implements SkillExecutionServiceContract
             } catch (\Throwable $e) {
                 // Never retry an external call whose outcome is unknown.
                 $run->status = SkillRun::STATUS_UNCERTAIN;
-                $run->outcome = SkillRun::OUTCOME_UNCERTAIN;
+                $run->outcome = Outcome::UNCERTAIN;
                 $run->reason = 'verification_missing';
                 $run->revision++;
                 $run->save();
@@ -159,8 +160,8 @@ final class SkillExecutionService implements SkillExecutionServiceContract
             $run->current_step = $result['current_step'];
             $run->status = $result['status'];
             $run->outcome = match ($result['status']) {
-                'completed' => SkillRun::OUTCOME_INCOMPLETE,
-                'failed' => SkillRun::OUTCOME_FAILED,
+                'completed' => Outcome::INCOMPLETE,
+                'failed' => Outcome::FAILED,
                 default => null,
             };
             $run->reason = $result['status'] === 'completed' ? 'verification_missing' : null;
@@ -169,7 +170,7 @@ final class SkillExecutionService implements SkillExecutionServiceContract
                     $verification = app(SkillOutcomeVerificationService::class)->verify($run, (array) ($result['context'] ?? []));
                 } catch (\Throwable) {
                     // Verification failure cannot replay a completed business operation.
-                    $verification = new OutcomeVerification(SkillRun::OUTCOME_UNCERTAIN, 'verification_missing');
+                    $verification = new OutcomeVerification(Outcome::UNCERTAIN, 'verification_missing');
                 }
                 $run->outcome = $verification->outcome;
                 $run->reason = $verification->reason;
@@ -203,7 +204,7 @@ final class SkillExecutionService implements SkillExecutionServiceContract
             }
             // 已发生副作用不回滚；取消是终态，不重放
             $run->status = SkillRun::STATUS_CANCELLED;
-            $run->outcome = SkillRun::OUTCOME_CANCELLED;
+            $run->outcome = Outcome::CANCELLED;
             $run->reason = $run->reason ?? 'cancelled';
             $run->revision = $run->revision + 1;
             $run->save();
@@ -434,16 +435,6 @@ final class SkillExecutionService implements SkillExecutionServiceContract
             SkillRun::STATUS_COMPLETED, SkillRun::STATUS_CANCELLED => null,
             default => null,
         };
-    }
-
-    private function clamp(array $value): array
-    {
-        $encoded = json_encode($value, JSON_UNESCAPED_UNICODE);
-        if ($encoded !== false && strlen($encoded) > 16384) {
-            return ['truncated' => true, 'summary' => mb_substr($encoded, 0, 500) . '…'];
-        }
-
-        return $value;
     }
 
     public function fingerprint(array $params): string

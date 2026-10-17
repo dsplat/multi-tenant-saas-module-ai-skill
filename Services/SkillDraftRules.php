@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MultiTenantSaas\Modules\AiSkill\Services;
 
+use MultiTenantSaas\Modules\AiSkill\Exceptions\SkillDomainException;
+
 /**
  * 候选正文的唯一结构标准。
  *
@@ -12,6 +14,26 @@ namespace MultiTenantSaas\Modules\AiSkill\Services;
  */
 final class SkillDraftRules
 {
+    /**
+     * 评测证据必须绑定「当前这份草稿」：改稿即证据失效。
+     *
+     * 发布是唯一咽喉（AUTO 采用与训练自动发布都从这里走），因此校验也只在这里做一次：
+     * 少了它，一份手写形状合格的 validation 就能带着旧证据发布未经评测的内容。
+     */
+    public static function assertCurrentEvaluationEvidence(array $draft, array $validation): void
+    {
+        $evaluation = (array) ($validation['evaluation'] ?? []);
+        if (($evaluation['evidence_level'] ?? null) !== CandidateEvaluator::EVIDENCE_LEVEL
+            || ! is_string($evaluation['draft_sha256'] ?? null)
+            || ! hash_equals($evaluation['draft_sha256'], self::fingerprint($draft))
+            || ! is_string($evaluation['manifest_sha256'] ?? null)
+            || ! preg_match('/^[a-f0-9]{64}$/D', $evaluation['manifest_sha256'])
+            || empty($evaluation['dataset_id']) || empty($evaluation['dataset_version'])
+            || empty($evaluation['rubric_version']) || empty($evaluation['evaluator_version'])) {
+            throw new SkillDomainException('verification_missing', 'Adoption requires current independent read-only evaluation evidence.');
+        }
+    }
+
     /**
      * @return array<string, string>
      */

@@ -108,6 +108,7 @@ class SkillRun extends Model
     {
         return in_array($this->status, [
             self::STATUS_COMPLETED,
+            self::STATUS_FAILED,
             self::STATUS_CANCELLED,
             self::STATUS_UNCERTAIN,
         ], true);

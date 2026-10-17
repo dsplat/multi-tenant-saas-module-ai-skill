@@ -9,12 +9,14 @@ use MultiTenantSaas\Contracts\PermissionCheckerContract;
 use MultiTenantSaas\Contracts\TaskChainHarnessContract;
 use MultiTenantSaas\Modules\AiSkill\Contracts\ActorResolverContract;
 use MultiTenantSaas\Modules\AiSkill\Contracts\SkillExecutionServiceContract;
+use MultiTenantSaas\Modules\AiSkill\DTOs\OutcomeVerification;
 use MultiTenantSaas\Modules\AiSkill\DTOs\RequestKey;
 use MultiTenantSaas\Modules\AiSkill\DTOs\SkillRunView;
 use MultiTenantSaas\Modules\AiSkill\DTOs\SkillSelection;
 use MultiTenantSaas\Modules\AiSkill\DTOs\ValidatedInput;
 use MultiTenantSaas\Modules\AiSkill\Exceptions\SkillDomainException;
 use MultiTenantSaas\Modules\AiSkill\Models\SkillDefinition;
+use MultiTenantSaas\Modules\AiSkill\Models\SkillExperience;
 use MultiTenantSaas\Modules\AiSkill\Models\SkillRun;
 
 /**
@@ -71,6 +73,7 @@ final class SkillExecutionService implements SkillExecutionServiceContract
             }
 
             $plan = $this->buildPlan($definition, $selection);
+            $plan['verification'] = app(SkillOutcomeVerificationService::class)->pin($definition);
 
             $run = SkillRun::create([
                 'tenant_id' => $tenantId,
@@ -122,7 +125,7 @@ final class SkillExecutionService implements SkillExecutionServiceContract
             if ($run->status === SkillRun::STATUS_UNCERTAIN) {
                 throw new SkillDomainException('review_required', 'Run result is uncertain; reconcile before advancing.');
             }
-            if ($run->status === SkillRun::STATUS_COMPLETED) {
+            if (in_array($run->status, [SkillRun::STATUS_COMPLETED, SkillRun::STATUS_FAILED], true)) {
                 return $this->view($run);
             }
 
@@ -143,6 +146,7 @@ final class SkillExecutionService implements SkillExecutionServiceContract
                 $run->reason = 'verification_missing';
                 $run->revision++;
                 $run->save();
+                $this->recordExperience($run);
 
                 return $this->view($run);
             }
@@ -159,10 +163,27 @@ final class SkillExecutionService implements SkillExecutionServiceContract
                 'failed' => SkillRun::OUTCOME_FAILED,
                 default => null,
             };
-            // Successful tool calls alone do not prove the business success criteria.
             $run->reason = $result['status'] === 'completed' ? 'verification_missing' : null;
+            if ($result['status'] === 'completed') {
+                try {
+                    $verification = app(SkillOutcomeVerificationService::class)->verify($run, (array) ($result['context'] ?? []));
+                } catch (\Throwable) {
+                    // Verification failure cannot replay a completed business operation.
+                    $verification = new OutcomeVerification(SkillRun::OUTCOME_UNCERTAIN, 'verification_missing');
+                }
+                $run->outcome = $verification->outcome;
+                $run->reason = $verification->reason;
+                $run->result_refs = array_merge((array) $run->result_refs, ['verification' => [
+                    'outcome' => $verification->outcome, 'reason' => $verification->reason,
+                    'evidence_refs' => $verification->evidenceRefs,
+                    'verifier' => $plan['verification']['verifier'] ?? null,
+                ]]);
+            }
             $run->revision++;
             $run->save();
+            if ($run->outcome !== null) {
+                $this->recordExperience($run);
+            }
 
             return $this->view($run);
         }, 3);
@@ -186,6 +207,7 @@ final class SkillExecutionService implements SkillExecutionServiceContract
             $run->reason = $run->reason ?? 'cancelled';
             $run->revision = $run->revision + 1;
             $run->save();
+            $this->recordExperience($run);
 
             return $this->view($run);
         }, 3);
@@ -247,6 +269,26 @@ final class SkillExecutionService implements SkillExecutionServiceContract
         }
 
         return ['steps' => $chain['steps'] ?? [], 'definition' => $chain, 'content_sha256' => $definition->content_sha256];
+    }
+
+    /** Called once under the run lock in the same transaction as its terminal outcome. */
+    private function recordExperience(SkillRun $run): void
+    {
+        SkillExperience::create([
+            'tenant_id' => (int) $run->tenant_id,
+            'actor_type' => 'operator', 'actor_id' => (int) $run->operator_id,
+            'task_ref' => 'skill.' . $run->skill_key,
+            'run_ref' => 'skill_run:' . $run->getKey(),
+            'source' => SkillExperience::SOURCE_SKILL,
+            'skill_key' => $run->skill_key, 'skill_version' => $run->skill_version,
+            'outcome' => $run->outcome, 'occurred_at' => now(),
+            'result_criteria' => (array) ($run->plan['verification']['criteria'] ?? []),
+            'input_refs' => ['skill_run:' . $run->getKey()],
+            'evidence_refs' => array_merge(['skill_run:' . $run->getKey()],
+                (array) ($run->result_refs['verification']['evidence_refs'] ?? [])),
+            // High trust means attributable server provenance, not necessarily a successful result.
+            'trust' => SkillExperience::TRUST_HIGH,
+        ]);
     }
 
     private function variantAllowed(SkillDefinition $definition, string $variantKey): bool

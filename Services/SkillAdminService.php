@@ -290,6 +290,23 @@ final class SkillAdminService
         })->all();
     }
 
+    /** Human review approves publication, never an unverified write or a new execution grant. */
+    private function assertIndependentReviewEvidence(SkillCandidate $candidate): void
+    {
+        $draft = (array) $candidate->skill_draft;
+        $evaluation = (array) ($candidate->validation['evaluation'] ?? []);
+        if (($draft['risk']['business_write'] ?? null) !== false
+            || ($evaluation['evidence_level'] ?? null) !== CandidateEvaluator::EVIDENCE_LEVEL
+            || ! is_string($evaluation['draft_sha256'] ?? null)
+            || ! hash_equals($evaluation['draft_sha256'], SkillDraftRules::fingerprint($draft))
+            || ! is_string($evaluation['manifest_sha256'] ?? null)
+            || ! preg_match('/^[a-f0-9]{64}$/D', $evaluation['manifest_sha256'])
+            || empty($evaluation['dataset_id']) || empty($evaluation['dataset_version'])
+            || empty($evaluation['rubric_version']) || empty($evaluation['evaluator_version'])) {
+            throw new SkillDomainException('verification_missing', 'Human approval requires current independent read-only evaluation evidence.');
+        }
+    }
+
     /**
      * 审核裁决：仍走 AdoptionPolicy，Admin 不得绕过策略。
      *
@@ -298,6 +315,9 @@ final class SkillAdminService
     public function decideCandidate(int $candidateId, string $action, array $context = []): array
     {
         $this->assertPlatform(self::PERM_MANAGE);
+        if (! in_array($action, ['evaluate', 'adopt', 'reject'], true)) {
+            throw new SkillDomainException('review_required', 'Unsupported review action.');
+        }
 
         return DB::transaction(function () use ($candidateId, $action): array {
             $candidate = SkillCandidate::withoutGlobalScopes()->whereKey($candidateId)->lockForUpdate()->first();
@@ -331,7 +351,18 @@ final class SkillAdminService
                 ];
                 if ($decision->isDenied()) {
                     $candidate->status = SkillCandidate::STATUS_REJECTED;
-                } elseif ($decision->isAuto() && $action === 'adopt') {
+                } elseif ($action === 'adopt') {
+                    if (! $decision->isAuto()) {
+                        $this->assertIndependentReviewEvidence($candidate);
+                        $result = (array) $candidate->adoption_policy_result;
+                        $result['review'] = [
+                            'approved_by' => (string) auth()->user()->getAuthIdentifier(),
+                            'approved_at' => now()->toIso8601String(),
+                            'draft_sha256' => SkillDraftRules::fingerprint((array) $candidate->skill_draft),
+                            'manifest_sha256' => $candidate->validation['evaluation']['manifest_sha256'],
+                        ];
+                        $candidate->adoption_policy_result = $result;
+                    }
                     app(CandidatePublication::class)->publish($candidate);
                     $candidate->status = SkillCandidate::STATUS_ADOPTED;
                 } else {

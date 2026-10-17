@@ -5,6 +5,10 @@ declare(strict_types=1);
 return [
     'enabled' => false,
 
+    // Exact Skill key => ['class' => verifier FQCN, 'version' => reviewed business rule version].
+    // Empty means no independent business-success claim. Never supplied by a candidate/request.
+    'outcome_verifiers' => [],
+
     // Platform operator ID => explicitly authorized tenant IDs; never inferred from membership.
     'platform_tenant_scopes' => [],
 

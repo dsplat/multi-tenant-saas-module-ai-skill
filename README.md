@@ -43,6 +43,8 @@ API：POST `/runs`、GET `/runs`及`/runs/{id}`、POST `/runs/{id}/advance|cance
 
 采样窗口在登记时冻结：`TrainingDataset::freeze()` 把请求里的自由格式 manifest 归一成 `source_types/time_from/time_to/field_allowlist/max_samples/access_mode/authorized_tenant_id`，缺窗口即 `data_incomplete` 拒绝，`remote_url`/`file_path` 一律 `scope_denied`；训练器只能按该冻结窗口取证据，授权面不在执行时决定。可用来源见 `ExperienceSourceAdapter`：`audit_logs`、`agent_tool_logs`、`task_chain_runs`、`ai_audit_logs`、`skill_experiences`。
 
+冻结窗口存 ISO-8601（带 `T` 与 `Z`/偏移），绑定进 SQL 前必须换成应用时区的 `Y-m-d H:i:s`：直接绑自由格式串会退化成字典序（`2026-10-13 09:30:00` < `2026-10-13T00:00:00+08:00`），与样本同一天的窗口恒空，训练会静默拿到 0 条证据却不报错。`ExperienceSourceAdapter::sqlBound()` 是唯一的转换点，五个采样来源共用；换算后的时刻参与比较，跨时区表达同一窗口必须命中同一批样本（回归：`AiSkillModelsAndAdapterTest`）。
+
 `evaluate`只评估；`adopt`才可发布。AdoptionPolicy从持久化validation指向的 `baseline_definition_id` 读取可见、已发布且正文校验通过的基线，忽略HTTP提交的baseline/限定租户。自动采用至少要求非空证据、passed、留出样本≥10、评分≥0.8且不低于基线、严重错误=0、风险已知且只读/不扩工具范围。写变更或范围/确认变化需审；缺证据拒绝。
 
 **validation 的唯一写入方是 `CandidateEvaluator`**：训练器 `proposeCandidate` 只写空数组，任何 HTTP 路径都不接收 validation 字段（源码检索确认只有评测器在候选行锁下赋值）。判据本身由平台治理入口冻结在 `ai_skill_eval_cases`（Admin `POST /api/v1/admin/ai-skills/eval-cases`，需 `platform.ai.skill.manage` 与显式租户范围）：同一 `case_key` 摘要相同幂等、不同即 409 要求另起 `dataset_version`，断言只允许 `contains/not_contains/equals/required_tools/forbidden_tools`，不接受「让模型自己评」；审计只记引用与数量，不落样本正文。评测执行前逐条按 `content_sha256` 复核（改题即 `verification_missing`），执行后复核候选正文摘要（正文被改写则结果作废、不落 validation），写能力候选与非白名单工具在执行前拒绝且零token消耗。评分全为确定性断言，不用 LLM 给 LLM 打分。这仍不等于效果验收：本地用例只证明判据可信与门会拒，真实LLM候选与留出集测量见下方关闭门。
@@ -171,3 +173,14 @@ php -d memory_limit=512M vendor/bin/phpunit \
 - 上表 P0–P2 对应「真实后台 / 跨仓」放行门；P3 对应 BL-147 关闭门。  
 - 本地 PHP/前端/构建/隔离 MySQL 门已在上表执行完毕，**不能替代** P0–P4。  
 - 执行结果回填 [backlog](../../../docs/governance/backlog.md) 与 LEDGER，不另建第二任务表。
+
+
+## 2026-10-17 本地收口接线补充（尚未发布）
+
+- 独立业务结果：部署配置 `ai-skill.outcome_verifiers` 以精确Skill key登记 `['class' => SkillOutcomeVerifierContract实现, 'version' => 业务判据版本]`。start将判据及校验器版本/文件摘要固定到plan；advance只使用服务端工具结果和已解析的租户/人员。校验器应只读核对权威业务事实，不能把工具自报成功当结论。无校验器/无判据为incomplete，校验器漂移/异常为uncertain；成功必须携带有限证据引用。生产默认登记为空，本轮未替项目伪造成功。
+- 终态经验：执行结果与SkillExperience在同一事务内写入，引用原run，不复制名单/提示词；重复推进或取消不重复写。success/incomplete/failed/uncertain/cancelled分别保留，可信来源不等于业务成功。
+- 受控人审：原Admin adopt在needs_review时要求当前独立评测的正文摘要、冻结数据集与评分器信息，且仅允许已验证只读变更；记录审核人、时刻、正文和manifest摘要后事务发布。写能力缺可信评测仍拒绝，人审发布不授予执行权。新评测记录写入draft_sha256，旧缺证据记录不能用于人审绕过。
+- ContextPlan旧AiSkill命名空间保留，复用core DTO；PHP文本chat/complete/stream与Node两类resolve接入同一ContextPlanner。未知模型窗口保持null，使用有限65536字节保守估计准入上限（非provider真实窗口、非精确token数），可在部署配置明确model_windows。系统规则和工具schema计入预算，历史按整轮裁减，当前输入/工具事实过大明确拒绝；工具调用/结果必须成对。Node使用PHP下发的context_messages并对每次provider请求执行context_bounds，旧PHP响应仍兼容。
+- 委派：Headless增加可选共享DelegateBudget；每次外呼前按输入估计＋输出预留扣准入额度，默认4次/262144估计单位，任务链共享16次/1048576。默认额度以有限上下文上限×调用次数配置，不是实际费用。链上先持久化分配与inflight标记，再发外呼，失败/崩溃不自动退款重放；旧人工回填恢复入口保留。仍需独立MySQL并发/崩溃恢复与跨入口完整覆盖验证，不能据这些机制测试关闭BL-148。
+
+实施状态、准确验收数字和接续工作只维护在 `docs/governance/backlog.md` 最新BL-150交接段。此补充不证明真实业务试点、全部写操作、全量回归或正式版本交付已经完成。

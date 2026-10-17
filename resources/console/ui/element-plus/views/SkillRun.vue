@@ -278,8 +278,30 @@ onMounted(async () => {
     } catch (error) {
       fail(error)
     }
+    return
   }
+  applyQueryDefaults()
 })
+
+// 业务页跳转时带上服务端算好的入参（?input=<JSON>），运营不必手抄参数。
+// 只是预填启动表单：版本、正文摘要、入参合法性仍由服务端固定与校验。
+function applyQueryDefaults() {
+  const rawInput = route.query.input
+  if (typeof rawInput === 'string' && rawInput !== '') {
+    try {
+      const parsed = JSON.parse(rawInput)
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        inputJson.value = JSON.stringify(parsed, null, 2)
+      }
+    } catch {
+      // 非法预填直接忽略，保持手工输入
+    }
+  }
+  const variant = route.query.variant
+  if (typeof variant === 'string' && variant !== '') {
+    variantKey.value = variant
+  }
+}
 </script>
 
 <style scoped>

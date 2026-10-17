@@ -494,6 +494,7 @@ final class CandidateEvaluator
             'baseline_definition_id' => $plan['baseline'] === null ? null : (int) $plan['baseline']['definition_id'],
             'evaluation' => [
                 'evidence_level' => self::EVIDENCE_LEVEL,
+                'draft_sha256' => $plan['draft_sha'],
                 'evaluator_version' => self::EVALUATOR_VERSION,
                 'dataset_id' => $plan['dataset_id'],
                 'dataset_version' => $plan['dataset_version'],
@@ -555,9 +556,7 @@ final class CandidateEvaluator
      */
     private function draftSha(array $draft): string
     {
-        $subset = array_intersect_key($draft, array_flip(array_keys(SkillDraftRules::rules())));
-
-        return hash('sha256', (string) json_encode($this->canonical($subset), JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
+        return SkillDraftRules::fingerprint($draft);
     }
 
     private function canonical(mixed $value): mixed

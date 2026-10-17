@@ -31,4 +31,22 @@ final class SkillDraftRules
             'success_criteria' => 'present|array',
         ];
     }
+
+    /** Bind independent evidence and review decisions to the exact candidate semantics. */
+    public static function fingerprint(array $draft): string
+    {
+        $canonical = function (mixed $value) use (&$canonical): mixed {
+            if (! is_array($value)) {
+                return $value;
+            }
+            if (! array_is_list($value)) {
+                ksort($value);
+            }
+
+            return array_map($canonical, $value);
+        };
+
+        return hash('sha256', json_encode($canonical(array_intersect_key($draft,
+            array_flip(array_keys(self::rules())))), JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
+    }
 }

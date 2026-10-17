@@ -226,7 +226,7 @@
         type="info"
         :closable="false"
         show-icon
-        title="「通过」不跳过评测、不绕过策略：服务端重算 AdoptionPolicy，未达标或需要人工扩权的一律 needs_review。"
+        title="「通过」先验证独立评测证据：未达标拒绝；需审的只读变更由获授权平台人员确认发布并留痕。发布不授予执行权，写能力仍需独立可信验证。"
         style="margin-top: 12px"
       />
     </el-card>
@@ -537,7 +537,7 @@ async function decide(row: CandidateFact, action: 'adopt' | 'reject') {
   try {
     await ElMessageBox.confirm(
       action === 'adopt'
-        ? '请求服务端按 AdoptionPolicy 裁决采用；界面不判定风险，也未跳过评测。'
+        ? '确认采用当前候选？服务端将复核独立评测和正文版本；需审的只读变更会记录您为审核人。发布后执行仍须另行授权。'
         : '拒绝该候选？已采用/已拒绝的候选不会被改写。',
       action === 'adopt' ? '采用裁决' : '拒绝候选',
     )

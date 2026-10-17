@@ -128,6 +128,23 @@ class ExperienceSourceAdapter implements ExperienceSourceAdapterContract
     }
 
     /**
+     * 冻结窗口存的是 ISO-8601（含 Z/偏移），落库比较必须是应用时区的 `Y-m-d H:i:s`。
+     * 直接把自由格式串绑到 timestamp 列上，sqlite 按字典序、MySQL 按非法日期处理，
+     * 结果都是「窗口恒空」——训练取样会静默拿到 0 条证据。
+     */
+    private function sqlBound(string $iso): string
+    {
+        try {
+            $at = new \DateTimeImmutable($iso);
+        } catch (\Exception) {
+            throw new SkillDomainException('data_incomplete', 'Invalid dataset time range.');
+        }
+
+        return $at->setTimezone(new \DateTimeZone((string) config('app.timezone', 'UTC')))
+            ->format('Y-m-d H:i:s');
+    }
+
+    /**
      * @return list<array<string, mixed>>
      */
     private function sampleAuditLogs(AuthorizedDatasetSpec $spec): array
@@ -138,8 +155,8 @@ class ExperienceSourceAdapter implements ExperienceSourceAdapterContract
 
         $q = DB::table('audit_logs')
             ->select(['log_id', 'tenant_id', 'user_id', 'action', 'resource_type', 'resource_id', 'created_at'])
-            ->where('created_at', '>=', $spec->timeFromIso)
-            ->where('created_at', '<=', $spec->timeToIso)
+            ->where('created_at', '>=', $this->sqlBound($spec->timeFromIso))
+            ->where('created_at', '<=', $this->sqlBound($spec->timeToIso))
             ->orderBy('created_at')
             ->orderBy('log_id') // 同秒稳定：唯一键收尾
             ->limit($this->limitOf($spec));
@@ -197,8 +214,8 @@ class ExperienceSourceAdapter implements ExperienceSourceAdapterContract
                 'agent_conversations.tenant_id',
                 'agent_conversations.user_id',
             ])
-            ->where('agent_tool_logs.created_at', '>=', $spec->timeFromIso)
-            ->where('agent_tool_logs.created_at', '<=', $spec->timeToIso)
+            ->where('agent_tool_logs.created_at', '>=', $this->sqlBound($spec->timeFromIso))
+            ->where('agent_tool_logs.created_at', '<=', $this->sqlBound($spec->timeToIso))
             ->orderBy('agent_tool_logs.created_at')
             ->orderBy('agent_tool_logs.log_id')
             ->limit($this->limitOf($spec));
@@ -251,8 +268,8 @@ class ExperienceSourceAdapter implements ExperienceSourceAdapterContract
 
         $q = DB::table('task_chain_runs')
             ->select(['run_id', 'tenant_id', 'conversation_id', 'chain_key', 'status', 'current_step', 'created_at', 'updated_at'])
-            ->where('created_at', '>=', $spec->timeFromIso)
-            ->where('created_at', '<=', $spec->timeToIso)
+            ->where('created_at', '>=', $this->sqlBound($spec->timeFromIso))
+            ->where('created_at', '<=', $this->sqlBound($spec->timeToIso))
             ->orderBy('created_at')
             ->orderBy('run_id')
             ->limit($this->limitOf($spec));
@@ -302,8 +319,8 @@ class ExperienceSourceAdapter implements ExperienceSourceAdapterContract
 
         $q = DB::table('ai_audit_logs')
             ->select(['audit_id', 'tenant_id', 'operator_id', 'agent_id', 'conversation_id', 'action', 'status', 'created_at'])
-            ->where('created_at', '>=', $spec->timeFromIso)
-            ->where('created_at', '<=', $spec->timeToIso)
+            ->where('created_at', '>=', $this->sqlBound($spec->timeFromIso))
+            ->where('created_at', '<=', $this->sqlBound($spec->timeToIso))
             ->orderBy('created_at')
             ->orderBy('audit_id')
             ->limit($this->limitOf($spec));
@@ -346,8 +363,8 @@ class ExperienceSourceAdapter implements ExperienceSourceAdapterContract
     private function sampleSkillExperiences(AuthorizedDatasetSpec $spec): array
     {
         $q = SkillExperience::query()
-            ->where('occurred_at', '>=', $spec->timeFromIso)
-            ->where('occurred_at', '<=', $spec->timeToIso)
+            ->where('occurred_at', '>=', $this->sqlBound($spec->timeFromIso))
+            ->where('occurred_at', '<=', $this->sqlBound($spec->timeToIso))
             ->orderBy('occurred_at')
             ->orderBy((new SkillExperience)->getKeyName())
             ->limit($this->limitOf($spec));

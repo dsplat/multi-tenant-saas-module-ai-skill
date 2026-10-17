@@ -30,7 +30,9 @@ final class SkillOutcomeVerificationService
             return new OutcomeVerification(Outcome::UNCERTAIN, 'version_conflict');
         }
         $verifier = app($pin['verifier']['class']);
-        if (! $verifier instanceof SkillOutcomeVerifierContract) {
+        // instanceof 只证明「像」，还得就是钉定的那个类：容器 bind 可以把注册类换成恒通过的实现，
+        // 而 sha 钉的只是注册类的文件，替换后仍然匹配。
+        if (! $verifier instanceof SkillOutcomeVerifierContract || get_class($verifier) !== $pin['verifier']['class']) {
             return new OutcomeVerification(Outcome::UNCERTAIN, 'verification_missing');
         }
 

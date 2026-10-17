@@ -31,6 +31,8 @@ final class ReasonCode
 
     public const INSUFFICIENT_EVIDENCE = 'insufficient_evidence';
 
+    public const CANCELLED = 'cancelled';
+
     /** @return list<string> */
     public static function all(): array
     {
@@ -45,6 +47,7 @@ final class ReasonCode
             self::VERIFICATION_MISSING,
             self::REVIEW_REQUIRED,
             self::INSUFFICIENT_EVIDENCE,
+            self::CANCELLED,
         ];
     }
 

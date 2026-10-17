@@ -231,6 +231,7 @@ final class SkillAdminService
 
         return SkillTrainingRun::withoutGlobalScopes()
             ->where('tenant_id', $tenantId)
+            ->orderByDesc('created_at')
             ->orderByDesc((new SkillTrainingRun)->getKeyName())
             ->limit(min(100, max(1, $limit)))
             ->get()
@@ -272,6 +273,7 @@ final class SkillAdminService
         // 跨租户读取只能显式去作用域 + 按已授权的 tenant_id 过滤。
         $query = SkillCandidate::withoutGlobalScopes()
             ->where('tenant_id', $tenantId)
+            ->orderByDesc('created_at')
             ->orderByDesc((new SkillCandidate)->getKeyName());
 
         return $query->limit($limit)->get()->map(function (SkillCandidate $candidate): array {

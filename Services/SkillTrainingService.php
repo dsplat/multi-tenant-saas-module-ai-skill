@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace MultiTenantSaas\Modules\AiSkill\Services;
 
 use Illuminate\Support\Facades\DB;
+use MultiTenantSaas\Context\ExecutionIdentity;
+use MultiTenantSaas\Context\TaskAuthEnvelope;
+use MultiTenantSaas\Contracts\ExecutionIdentityContract;
 use MultiTenantSaas\Modules\AiSkill\Contracts\ActorResolverContract;
 use MultiTenantSaas\Modules\AiSkill\Contracts\AdoptionPolicyContract;
 use MultiTenantSaas\Modules\AiSkill\Contracts\SkillTrainingServiceContract;
@@ -84,10 +87,25 @@ final class SkillTrainingService implements SkillTrainingServiceContract
 
         // 只在事务提交后派发；执行器默认关闭（试点开关），同步驱动下不会误跑
         if ($created !== null && config('ai-skill.training.enabled') === true) {
-            RunSkillTrainingJob::dispatch($created, $tenantId);
+            RunSkillTrainingJob::dispatch($created, $tenantId)
+                ->withTaskAuthEnvelope($this->taskEnvelope('ai-skill.training-run', $tenantId));
         }
 
         return $result;
+    }
+
+    /**
+     * 派发信封：HTTP 触发继承当前身份（不扩大上限）；无请求身份时用显式受信 service。
+     */
+    private function taskEnvelope(string $subjectId, int $tenantId): TaskAuthEnvelope
+    {
+        $identity = app(ExecutionIdentityContract::class)->current();
+
+        if ($identity instanceof ExecutionIdentity) {
+            return TaskAuthEnvelope::fromIdentity($identity, $subjectId);
+        }
+
+        return TaskAuthEnvelope::forService($subjectId, $tenantId, $subjectId);
     }
 
     /**

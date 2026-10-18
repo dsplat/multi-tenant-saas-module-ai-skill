@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace MultiTenantSaas\Modules\AiSkill\Services;
 
 use Illuminate\Support\Facades\DB;
+use MultiTenantSaas\Context\ExecutionIdentity;
+use MultiTenantSaas\Context\TaskAuthEnvelope;
+use MultiTenantSaas\Contracts\ExecutionIdentityContract;
 use MultiTenantSaas\Contracts\PermissionCheckerContract;
 use MultiTenantSaas\Modules\AiSkill\Contracts\AdoptionPolicyContract;
 use MultiTenantSaas\Modules\AiSkill\DTOs\AdoptionDecision;
@@ -213,7 +216,8 @@ final class SkillAdminService
 
         // 事务提交后才派发：执行器默认关闭，登记与真实调用分离
         if ($created !== null && config('ai-skill.training.enabled') === true) {
-            RunSkillTrainingJob::dispatch($created, $tenantId);
+            RunSkillTrainingJob::dispatch($created, $tenantId)
+                ->withTaskAuthEnvelope($this->taskEnvelope('ai-skill.training-run', $tenantId));
         }
 
         return $result;
@@ -524,7 +528,8 @@ final class SkillAdminService
             return $this->candidatePayload($candidate);
         }
 
-        RunCandidateEvaluationJob::dispatch($candidateId, $tenantId, $datasetId, $datasetVersion);
+        RunCandidateEvaluationJob::dispatch($candidateId, $tenantId, $datasetId, $datasetVersion)
+            ->withTaskAuthEnvelope($this->taskEnvelope('ai-skill.candidate-evaluation', $tenantId));
         $this->audit('candidate_evaluate', [
             'candidate_id' => (string) $candidateId,
             'tenant_id' => (string) $tenantId,
@@ -533,6 +538,20 @@ final class SkillAdminService
         ]);
 
         return $this->candidatePayload($candidate);
+    }
+
+    /**
+     * 派发信封：HTTP 触发继承当前身份（不扩大上限）；无请求身份时用显式受信 service。
+     */
+    private function taskEnvelope(string $subjectId, int $tenantId): TaskAuthEnvelope
+    {
+        $identity = app(ExecutionIdentityContract::class)->current();
+
+        if ($identity instanceof ExecutionIdentity) {
+            return TaskAuthEnvelope::fromIdentity($identity, $subjectId);
+        }
+
+        return TaskAuthEnvelope::forService($subjectId, $tenantId, $subjectId);
     }
 
     private function assertDatasetRef(string $datasetId, string $datasetVersion): void

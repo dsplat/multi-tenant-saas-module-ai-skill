@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MultiTenantSaas\Modules\AiSkill;
 
+use MultiTenantSaas\Contracts\ExecutionSubjectStateContract;
 use MultiTenantSaas\Modules\Contracts\ModuleServiceProvider;
 
 /**
@@ -39,6 +40,12 @@ class AiSkillServiceProvider extends ModuleServiceProvider
 
     protected function bootModule(): void
     {
+        if ($this->app->bound(ExecutionSubjectStateContract::class)) {
+            $subjects = $this->app->make(ExecutionSubjectStateContract::class);
+            $subjects->trustService('ai-skill.training-run');
+            $subjects->trustService('ai-skill.candidate-evaluation');
+        }
+
         $this->app['router']->aliasMiddleware('ai-skill.enabled', Http\Middleware\EnsureAiSkillEnabled::class);
     }
 }

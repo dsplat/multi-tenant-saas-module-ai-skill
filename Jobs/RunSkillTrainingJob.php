@@ -10,6 +10,8 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\DB;
+use MultiTenantSaas\Concerns\HasTaskAuthEnvelope;
+use MultiTenantSaas\Context\CarriesTaskAuthEnvelope;
 use MultiTenantSaas\Context\TenantContext;
 use MultiTenantSaas\Modules\AiSkill\Models\SkillTrainingRun;
 use MultiTenantSaas\Modules\AiSkill\Services\SkillTrainer;
@@ -21,9 +23,9 @@ use MultiTenantSaas\Modules\AiSkill\Services\SkillTrainer;
  * 队列层失败（超时/worker 异常）不经 handle，必须在 failed() 落终态，
  * 否则任务永卡 running。领取与终态写入都是条件更新，重复投递安全。
  */
-class RunSkillTrainingJob implements ShouldQueue
+class RunSkillTrainingJob implements CarriesTaskAuthEnvelope, ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, HasTaskAuthEnvelope, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $tries = 1;
 

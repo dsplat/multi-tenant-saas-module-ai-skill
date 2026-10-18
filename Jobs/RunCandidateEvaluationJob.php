@@ -9,6 +9,8 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use MultiTenantSaas\Concerns\HasTaskAuthEnvelope;
+use MultiTenantSaas\Context\CarriesTaskAuthEnvelope;
 use MultiTenantSaas\Context\TenantContext;
 use MultiTenantSaas\Modules\AiSkill\Services\CandidateEvaluator;
 
@@ -18,9 +20,9 @@ use MultiTenantSaas\Modules\AiSkill\Services\CandidateEvaluator;
  * 样本可能几十条、每条都要真实执行，故必须异步；tries=1 与训练同理（重复即重复烧 token）。
  * 固定链执行路径由 harness 显式带 tenant，不依赖请求认证态；评测器只在候选行锁下写 validation。
  */
-class RunCandidateEvaluationJob implements ShouldQueue
+class RunCandidateEvaluationJob implements CarriesTaskAuthEnvelope, ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, HasTaskAuthEnvelope, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $tries = 1;
 

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MultiTenantSaas\Modules\AiSkill\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use MultiTenantSaas\Concerns\BelongsToTenant;
 use MultiTenantSaas\Concerns\HasGlobalId;
 use MultiTenantSaas\Concerns\SerializesFriendlyDates;
 
@@ -16,7 +17,7 @@ use MultiTenantSaas\Concerns\SerializesFriendlyDates;
  */
 class SkillRun extends Model
 {
-    use HasGlobalId;
+    use BelongsToTenant, HasGlobalId;
     use SerializesFriendlyDates;
 
     public const STATUS_RUNNING = 'running';

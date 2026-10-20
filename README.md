@@ -61,7 +61,7 @@ CandidatePublication在候选行锁和同一事务内发布 `tenant.<tenant_id>.
 
 判据冻结/列表（`/admin/ai-skills/eval-cases`）与评测触发（`/admin/ai-skills/candidates/{id}/evaluate`）与上述页面同权限同范围；页面接线不等于验收：真实后台会话、开关开启后的实际花费与效果测量仍是下方试点阻断门，未完成。
 
-新增增量权限迁移 `2026_10_15_000001_add_ai_skill_admin_permissions`，与PermissionSeeder一致，仅给super_admin/platform_admin全局角色，不授tenant_admin/member平台权限。
+权限迁移 `2026_10_15_000001_add_ai_skill_admin_permissions` 已并入 `2026_10_13_000002_ai_skill_module_data` 的 steps，与PermissionSeeder一致，仅给super_admin/platform_admin全局角色，不授tenant_admin/member平台权限。
 
 平台权限不隐含所有租户数据权限。租户版本/候选/训练操作另需明确tenant_id及服务端 `ai-skill.platform_tenant_scopes.<platform_operator_id>` 整数租户白名单，默认空。无目标租户拒绝，不自动读取全部候选。公共scope_id=0不是默认业务租户。治理写操作和最小审计处于同一事务，审计失败不静默放行。
 

@@ -11,7 +11,8 @@
   "require": {
     "php": "^8.3",
     "dsplat/multi-tenant-saas": "^2.13.1 || ^3.0",
-    "dsplat/multi-tenant-saas-module-ai": "^2.0 || ^3.0"
+    "dsplat/multi-tenant-saas-module-ai": "^2.0 || ^3.0",
+    "dsplat/multi-tenant-saas-base": "^3.3"
   },
   "extra": {
     "saas": {
